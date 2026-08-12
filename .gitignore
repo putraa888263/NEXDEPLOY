@@ -1,8 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# Dependencies
+/node_modules/
+/.pnp/
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,34 +8,70 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# Build, test, and runtime output
+/coverage/
 /.next/
 /.vinext/
 /out/
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-dev.*.log
-*.tgz
-*.tsbuildinfo
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
 /dist/
 /.wrangler/
 /outputs/
 /work/
+*.tsbuildinfo
+
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+.dev.vars
+.dev.vars.*
+/secrets/
+/credentials/
+*.secret
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa*
+id_ed25519*
+service-account*.json
+credentials*.json
+wrangler.toml
+.npmrc
+
+# Local databases, uploads, and backups
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+/uploads/
+/storage/
+/backups/
+/panel/
+
+# Logs and generated archives
+*.log
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Hosting clients
+/.vercel/

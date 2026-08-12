@@ -17,6 +17,7 @@ html { background: #f6f7f9; }
 body { margin: 0; background: #f6f7f9; color: var(--ink); font-family: var(--font-geist-sans), Arial, sans-serif; letter-spacing: 0; }
 button, input, select { font: inherit; letter-spacing: 0; }
 button { color: inherit; }
+button:disabled { cursor: not-allowed; opacity: .48; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid rgba(37, 99, 235, .24); outline-offset: 2px; }
 
 .app-shell { min-height: 100vh; }
@@ -39,6 +40,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .mini-meter span { display: block; height: 100%; border-radius: inherit; background: #4b86f8; }
 .server-meta { display: flex; justify-content: space-between; margin-top: 7px; color: #7f8a9a; font-size: 10px; }
 .profile { display: flex; align-items: center; gap: 10px; height: 69px; padding: 0 18px; border-top: 1px solid rgba(255,255,255,.07); }
+.profile-button { width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.profile-button:hover { background: rgba(255,255,255,.04); }
 .profile .avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: #d9e4fb; color: #275bb9; font-size: 11px; font-weight: 760; }
 .profile div { display: grid; flex: 1; }
 .profile strong { font-size: 12px; }
@@ -173,6 +176,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 .scrim { display: none; }
 
+.auth-loading { display: grid; min-height: 100vh; place-items: center; color: #66717e; font-size: 12px; }
+.login-page { display: grid; min-height: 100vh; grid-template-columns: minmax(340px,.85fr) minmax(480px,1.15fr); background: white; }
+.login-brand { display: flex; min-height: 100vh; flex-direction: column; justify-content: space-between; padding: 38px clamp(32px,6vw,82px); background: #161c26; color: white; }
+.login-logo { height: auto; padding: 0; border: 0; }
+.login-brand > div:nth-child(2) { max-width: 470px; }
+.login-kicker { color: #78a6ff; font-size: 9px; font-weight: 750; text-transform: uppercase; }
+.login-brand h1 { margin: 14px 0 18px; font-size: clamp(32px,4vw,54px); line-height: 1.08; font-weight: 680; }
+.login-brand > div:nth-child(2) p { margin: 0; color: #9ea9b8; font-size: 13px; line-height: 1.7; }
+.login-health { display: flex; align-items: center; gap: 11px; color: #58d49e; }.login-health span { display: grid; }.login-health strong { font-size: 11px; }.login-health small { margin-top: 3px; color: #788596; font-size: 9px; }
+.login-form-wrap { display: grid; place-items: center; padding: 36px; background: #f7f8fa; }
+.login-form { display: grid; width: min(430px,100%); gap: 17px; padding: 34px; border: 1px solid #e2e6eb; border-radius: 8px; background: white; box-shadow: 0 12px 40px rgba(28,38,52,.07); }
+.login-form h2 { margin: 7px 0 5px; font-size: 23px; }.login-form > div:first-child p { margin: 0; color: #77808c; font-size: 10px; }
+.login-form > label { display: grid; gap: 7px; }.login-form > label span, .login-form legend { color: #58626e; font-size: 10px; font-weight: 650; }.login-form input { height: 42px; padding: 0 12px; border: 1px solid #d8dee6; border-radius: 5px; outline: 0; font-size: 11px; }.login-form input:focus { border-color: #91afe4; box-shadow: 0 0 0 3px #eff4fd; }
+.login-form fieldset { margin: 0; padding: 0; border: 0; }.login-form legend { margin-bottom: 8px; }.role-options { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }.role-options button { display: grid; min-height: 59px; place-items: center; align-content: center; gap: 3px; border: 1px solid #dfe4ea; border-radius: 5px; background: white; cursor: pointer; }.role-options button.active { border-color: #7199e5; background: #f2f6fe; color: #245dbf; box-shadow: 0 0 0 2px #e7effd; }.role-options strong { font-size: 9px; }.role-options small { color: #8a929d; font-size: 7px; }.login-submit { width: 100%; height: 43px; }.login-note { color: #959ca5; font-size: 8px; text-align: center; }.login-error { margin: -5px 0; color: #c83c48; font-size: 9px; }
+.upload-zone { cursor: pointer; }.upload-zone.has-file { border-color: #75b99c; background: #f4fbf7; color: #18835e; }.upload-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
 @media (max-width: 1100px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .project-cards { grid-template-columns: repeat(2, 1fr); }
@@ -183,6 +202,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 }
 
 @media (max-width: 860px) {
+  .login-page { grid-template-columns: 1fr; }.login-brand { min-height: 250px; padding: 28px; }.login-brand > div:nth-child(2) { margin: 45px 0; }.login-brand h1 { font-size: 32px; }.login-form-wrap { padding: 28px 18px; }
   .sidebar { transform: translateX(-100%); transition: transform .2s ease; }.sidebar.open { transform: translateX(0); }
   .scrim { position: fixed; inset: 0; z-index: 29; display: block; width: 100%; border: 0; background: rgba(12,17,24,.45); }
   .main-content { margin-left: 0; }.topbar { justify-content: space-between; height: 64px; padding: 0 22px; }.mobile-menu { display: inline-grid; }.mobile-brand { display: block; margin-right: auto; margin-left: 9px; font-size: 13px; font-weight: 760; }
@@ -194,6 +214,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 }
 
 @media (max-width: 640px) {
+  .login-brand { min-height: 220px; }.login-brand h1 { font-size: 27px; }.login-health { display: none; }.login-form { padding: 24px 18px; }.role-options { grid-template-columns: 1fr; }.role-options button { min-height: 49px; }
   .topbar { padding: 0 14px; }.topbar .primary-btn { width: 38px; padding: 0; }.topbar .primary-btn span { display: none; }
   .content-wrap { width: calc(100% - 24px); }.page-heading { min-height: 0; }.page-heading h1 { font-size: 21px; }.system-ok { display: none; }
   .stat-grid { grid-template-columns: 1fr 1fr; gap: 9px; }.stat-item { height: 110px; gap: 9px; padding: 14px; }.stat-icon { width: 31px; height: 31px; flex-basis: 31px; }.stat-icon svg { width: 17px; }.stat-item strong { font-size: 18px; }.spark, .ring, .storage-bar { display: none; }
