@@ -53,6 +53,10 @@ wrangler.toml
 /storage/
 /backups/
 /panel/
+/executor-work/
+/executor/.nexdeploy/
+/executor/releases/
+/executor/archives/
 
 # Logs and generated archives
 *.log
@@ -75,3 +79,8 @@ Thumbs.db
 
 # Hosting clients
 /.vercel/
+
+# Docker and VPS machine overrides
+docker-compose.override.yml
+docker-compose.local.yml
+compose.override.yml

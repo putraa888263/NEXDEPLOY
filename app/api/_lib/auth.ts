@@ -33,30 +33,13 @@ export async function verifyPassword(password: string, saved: string) {
   return Boolean(salt && expected) && (await passwordHash(password, salt)) === expected;
 }
 
-const initialAdministrators = [
-  { name: "Ade", email: "ade@nexdeploy.local" },
-  { name: "Reza", email: "reza@nexdeploy.local" },
-  { name: "Ikbal", email: "ikbal@nexdeploy.local" },
-];
-
-async function ensureInitialAdministrators() {
-  await ensureDatabase();
-  const db = getD1();
-  for (const administrator of initialAdministrators) {
-    const exists = await db.prepare("SELECT id FROM users WHERE lower(email) = lower(?)").bind(administrator.email).first<{ id: string }>();
-    if (exists) continue;
-    await db.prepare("INSERT INTO users (id, name, email, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(crypto.randomUUID(), administrator.name, administrator.email, await createPasswordHash("admin123"), "Administrator", "Active", new Date().toISOString()).run();
-  }
-}
-
 function loginAttemptKey(request: Request, email: string) {
   const address = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
   return `${email.trim().toLowerCase()}:${address}`;
 }
 
 export async function login(request: Request, email: string, password: string) {
-  await ensureInitialAdministrators();
+  await ensureDatabase();
   const db = getD1();
   const key = loginAttemptKey(request, email);
   const now = new Date();
@@ -83,7 +66,7 @@ export async function login(request: Request, email: string, password: string) {
 }
 
 export async function currentUser(request: Request): Promise<SessionUser | null> {
-  await ensureInitialAdministrators();
+  await ensureDatabase();
   const token = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${sessionCookie}=`))?.slice(sessionCookie.length + 1);
   if (!token) return null;
   const row = await getD1().prepare("SELECT users.id, users.name, users.email, users.role, users.status FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.status = 'Active'")

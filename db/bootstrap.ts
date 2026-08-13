@@ -34,13 +34,14 @@ async function initialize(db: D1Database) {
     db.prepare("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, domain TEXT NOT NULL, framework TEXT NOT NULL, database_type TEXT NOT NULL, version TEXT NOT NULL, status TEXT NOT NULL, cpu INTEGER NOT NULL DEFAULT 0, memory INTEGER NOT NULL DEFAULT 0, color TEXT NOT NULL, archive_key TEXT, archive_name TEXT, archive_size INTEGER, archive_validation TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS activity (id TEXT PRIMARY KEY, project_id TEXT, type TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0, locked_until TEXT, updated_at TEXT NOT NULL)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS deployments (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, archive_key TEXT NOT NULL, archive_name TEXT NOT NULL, executor TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS deployments (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, requested_by TEXT NOT NULL, archive_key TEXT NOT NULL, archive_name TEXT NOT NULL, executor TEXT NOT NULL, status TEXT NOT NULL, action TEXT NOT NULL DEFAULT 'Deploy', source_deployment_id TEXT, executor_job_id TEXT, error TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS deployment_logs (id TEXT PRIMARY KEY, deployment_id TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS project_environment (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, key TEXT NOT NULL, value_encrypted TEXT NOT NULL, is_secret INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, UNIQUE(project_id, key))"),
     db.prepare("CREATE TABLE IF NOT EXISTS project_resources (project_id TEXT PRIMARY KEY, php_version TEXT NOT NULL, cpu_limit INTEGER NOT NULL, memory_limit INTEGER NOT NULL, disk_quota INTEGER NOT NULL, internal_port INTEGER NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS backups (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, size INTEGER, retention_days INTEGER NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS backup_jobs (id TEXT PRIMARY KEY, backup_id TEXT NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, finished_at TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS backup_logs (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS executor_settings (id INTEGER PRIMARY KEY, url TEXT NOT NULL, token_encrypted TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_activity_created_at ON activity(created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_login_attempts_locked_until ON login_attempts(locked_until)"),
@@ -61,6 +62,11 @@ async function initialize(db: D1Database) {
   if (!existingProjectColumns.has("archive_name")) await db.prepare("ALTER TABLE projects ADD COLUMN archive_name TEXT").run();
   if (!existingProjectColumns.has("archive_size")) await db.prepare("ALTER TABLE projects ADD COLUMN archive_size INTEGER").run();
   if (!existingProjectColumns.has("archive_validation")) await db.prepare("ALTER TABLE projects ADD COLUMN archive_validation TEXT").run();
+  const deploymentColumns = await db.prepare("PRAGMA table_info(deployments)").all<{ name: string }>();
+  const existingDeploymentColumns = new Set((deploymentColumns.results ?? []).map((column) => column.name));
+  if (!existingDeploymentColumns.has("action")) await db.prepare("ALTER TABLE deployments ADD COLUMN action TEXT NOT NULL DEFAULT 'Deploy'").run();
+  if (!existingDeploymentColumns.has("source_deployment_id")) await db.prepare("ALTER TABLE deployments ADD COLUMN source_deployment_id TEXT").run();
+  if (!existingDeploymentColumns.has("executor_job_id")) await db.prepare("ALTER TABLE deployments ADD COLUMN executor_job_id TEXT").run();
   const now = new Date().toISOString();
   await db.prepare("INSERT OR IGNORE INTO settings (id, server_name, server_ip, location, project_directory, base_domain, npm_url, ssl_email, default_database, database_version, backup_retention, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(defaultSettings.serverName, defaultSettings.serverIp, defaultSettings.location, defaultSettings.projectDirectory, defaultSettings.baseDomain, defaultSettings.npmUrl, defaultSettings.sslEmail, defaultSettings.defaultDatabase, defaultSettings.databaseVersion, defaultSettings.backupRetention, now).run();

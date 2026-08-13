@@ -79,11 +79,12 @@ type Project = {
 type ProjectDraft = { name: string; framework: string; database: DatabaseType; fileName: string; file?: File };
 type PanelUser = { id: string; name: string; email: string; role: Role; status: "Active" | "Disabled"; lastLoginAt: string | null; createdAt: string };
 type SignedInUser = { id: string; name: string; email: string; role: Role };
-type Deployment = { id: string; status: "Queued" | "Running" | "WaitingExecutor" | "Failed" | "Succeeded"; archiveName: string; executor: string; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null };
+type Deployment = { id: string; status: "Queued" | "Running" | "WaitingExecutor" | "Failed" | "Succeeded"; archiveName: string; executor: string; action?: "Deploy" | "Rollback"; sourceDeploymentId?: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null };
 type DeploymentLog = { id: string; level: "info" | "success" | "warning" | "error"; message: string; createdAt: string };
 type EnvironmentVariable = { key: string; value: string; isSecret: boolean; saved?: boolean };
 type ProjectResources = { phpVersion: string; cpuLimit: number; memoryLimit: number; diskQuota: number; internalPort: number; updatedAt?: string };
 type Backup = { id: string; name: string; type: string; status: string; size: number | null; retentionDays: number; createdAt: string; completedAt: string | null };
+type ActivityRecord = { id: string; type: "deployment" | "system" | "backup" | "account" | "environment" | "resource"; title: string; detail: string; createdAt: string; projectName: string | null };
 type ArchiveValidation = { detectedFramework: string; files: number; readiness: "Ready" | "Warning"; warnings: string[]; requirements: { composer: boolean; phpVersion: string | null; laravelVersion: string | null; envExample: boolean; migrations: boolean; packageJson: boolean; buildScript: boolean } };
 
 const defaultSettings: AppSettings = { serverName: "VPS Utama", serverIp: "103.127.96.42", location: "Jakarta", projectDirectory: "/opt/nexdeploy/projects", baseDomain: "apps.adecloud.id", npmUrl: "http://103.127.96.42:81", sslEmail: "admin@adecloud.id", defaultDatabase: "MariaDB", databaseVersion: "11.4", backupRetention: 7 };
@@ -130,6 +131,7 @@ export default function Home() {
   const [role, setRole] = useState<Role | null>(null);
   const [signedInUser, setSignedInUser] = useState<SignedInUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [selected, setSelected] = useState<Project | null>(null);
   const [detailTab, setDetailTab] = useState("overview");
   const [query, setQuery] = useState("");
@@ -147,7 +149,8 @@ export default function Home() {
   }
 
   useEffect(() => {
-    fetch("/api/auth/session").then(async (response) => {
+    Promise.all([fetch("/api/setup").then((response) => response.json()), fetch("/api/auth/session")]).then(async ([setup, response]) => {
+      setNeedsSetup(Boolean(setup.needsSetup));
       if (!response.ok) return;
       const { user } = await response.json();
       setRole(user.role as Role);
@@ -192,7 +195,7 @@ export default function Home() {
     if (!selectedFile) return notify("Project dibuat, tetapi ZIP belum dipilih.");
     upload.set("archive", selectedFile);
     let uploadResponse: Response;
-    let uploadResult: { error?: string; archive?: { detectedFramework: string } };
+    let uploadResult: { error?: string; archive?: { name: string; size: number; detectedFramework: string } };
     try {
       uploadResponse = await fetch(`/api/projects/${result.project.id}/upload`, { method: "POST", body: upload });
       uploadResult = await uploadResponse.json().catch(() => ({}));
@@ -201,15 +204,29 @@ export default function Home() {
       setView("projects");
       return notify("Upload terputus. Pastikan ZIP maksimal 100 MB lalu coba unggah ulang dari detail project.");
     }
-    setProjects((items) => [result.project, ...items]);
     if (!uploadResponse.ok) {
+      setProjects((items) => [result.project, ...items]);
       setModalOpen(false);
       setView("projects");
       return notify(`Project dibuat, tetapi ZIP ditolak: ${uploadResult.error || "Terjadi kesalahan pada server lokal."}`);
     }
+    if (!uploadResult.archive) {
+      setProjects((items) => [result.project, ...items]);
+      setModalOpen(false);
+      setView("projects");
+      return notify("Project dibuat, tetapi respons upload ZIP tidak lengkap. Unggah ulang dari detail project.");
+    }
+    const createdProject = {
+      ...result.project,
+      archiveName: uploadResult.archive.name,
+      archiveSize: uploadResult.archive.size,
+      archiveValidation: JSON.stringify(uploadResult.archive),
+      updatedAt: new Date().toISOString(),
+    };
+    setProjects((items) => [createdProject, ...items]);
     setModalOpen(false);
     setView("projects");
-    notify(`${result.project.name} siap diproses. ZIP ${uploadResult.archive?.detectedFramework ?? "aplikasi"} sudah tervalidasi.`);
+    notify(`${result.project.name} siap diproses. ZIP ${uploadResult.archive.detectedFramework} sudah tervalidasi.`);
   }
   async function uploadProjectArchive(project: Project, file: File) {
     const upload = new FormData();
@@ -263,7 +280,7 @@ export default function Home() {
   async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setRole(null); setSignedInUser(null); setProjects([]); setSelected(null); setView("dashboard"); }
 
   if (!ready) return <div className="auth-loading">Menyiapkan NEXDEPLOY...</div>;
-  if (!role) return <LoginScreen onLogin={login} />;
+  if (!role) return needsSetup ? <InitialSetup onComplete={() => setNeedsSetup(false)} /> : <LoginScreen onLogin={login} />;
 
   const canOperate = role !== "Viewer";
   const isAdmin = role === "Administrator";
@@ -318,7 +335,7 @@ export default function Home() {
               {view === "projects" && <ProjectsView projects={filtered} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} openProject={setSelected} openModal={() => setModalOpen(true)} canOperate={canOperate} />}
               {view === "activity" && <ActivityView />}
               {view === "backups" && <BackupsView notify={notify} />}
-              {view === "settings" && <SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} isAdmin={isAdmin} />}
+              {view === "settings" && <><SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} isAdmin={isAdmin} />{isAdmin && <ExecutorSettings notify={notify} />}</>}
             </>
           )}
         </div>
@@ -426,7 +443,11 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
 function DeploymentsTab({ projectId }: { projectId: string }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   useEffect(() => { void fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()).then((data) => setDeployments(data.deployments ?? [])); }, [projectId]);
-  return <section className="panel table-panel"><div className="panel-head"><div><h2>Riwayat deployment</h2><p>Antrean dan hasil worker terbaru.</p></div></div><div className="data-table"><div className="table-row head"><span>Arsip</span><span>Status</span><span>Executor</span><span>Waktu</span><span /></div>{deployments.length ? deployments.map((deployment) => <div className="table-row" key={deployment.id}><strong>{deployment.archiveName}</strong><span className={deployment.status === "WaitingExecutor" ? "status status-deploying" : deployment.status === "Failed" ? "status status-stopped" : "success-label"}>{deployment.status === "WaitingExecutor" ? "Menunggu executor" : deployment.status}</span><span>{deployment.executor}</span><span>{relativeTime(deployment.createdAt)}</span><button className="icon-btn subtle" title={deployment.error ?? "Detail deployment"}><MoreHorizontal size={17} /></button></div>) : <div className="empty-state"><FileArchive size={26} /><h3>Belum ada deployment</h3><p>Unggah ZIP lalu pilih Deploy ulang.</p></div>}</div></section>;
+  const refresh = async () => { const data = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()); setDeployments(data.deployments ?? []); };
+  const retry = async (deployment: Deployment) => { const response = await fetch(`/api/deployments/${deployment.id}/retry`, { method: "POST" }); const result = await response.json(); if (!response.ok) return; await refresh(); };
+  const rollback = async () => { const response = await fetch(`/api/projects/${projectId}/rollback`, { method: "POST" }); if (response.ok) await refresh(); };
+  const duration = (deployment: Deployment) => deployment.startedAt && deployment.finishedAt ? `${Math.max(0, Math.round((new Date(deployment.finishedAt).getTime() - new Date(deployment.startedAt).getTime()) / 1000))} detik` : "-";
+  return <section className="panel table-panel"><div className="panel-head"><div><h2>Riwayat deployment</h2><p>Antrean, detail error, dan permintaan rollback.</p></div><button className="secondary-btn" onClick={() => void rollback()}><RotateCcw size={16} />Rollback</button></div><div className="data-table"><div className="table-row head"><span>Arsip</span><span>Status</span><span>Durasi</span><span>Waktu</span><span /></div>{deployments.length ? deployments.map((deployment) => <div className="table-row" key={deployment.id}><span><strong>{deployment.archiveName}</strong><small className="deployment-action">{deployment.action ?? "Deploy"} · {deployment.executor}</small>{deployment.error && <small className="deployment-error">{deployment.error}</small>}</span><span className={deployment.status === "WaitingExecutor" ? "status status-deploying" : deployment.status === "Failed" ? "status status-stopped" : "success-label"}>{deployment.status === "WaitingExecutor" ? "Menunggu executor" : deployment.status}</span><span>{duration(deployment)}</span><span>{relativeTime(deployment.createdAt)}</span>{["WaitingExecutor", "Failed"].includes(deployment.status) ? <button className="restore-btn" onClick={() => void retry(deployment)}><RefreshCw size={15} />Coba ulang</button> : <span />}</div>) : <div className="empty-state"><FileArchive size={26} /><h3>Belum ada deployment</h3><p>Unggah ZIP lalu pilih Deploy ulang.</p></div>}</div></section>;
 }
 
 function EnvironmentTab({ project, notify, canOperate }: { project: Project; notify: (m: string) => void; canOperate: boolean }) {
@@ -473,13 +494,14 @@ function DatabaseTab({ project, notify, canOperate }: { project: Project; notify
 }
 
 function ActivityView() {
-  return <section className="panel activity-page"><div className="activity-filters"><button className="active">Semua</button><button>Deployment</button><button>Sistem</button><button>Backup</button></div><div className="activity-feed">{[
-    ["Deployment berhasil", "NexBill versi v1.8.2 sudah aktif dan lolos health check.", "4 menit lalu", "success"],
-    ["Deployment dimulai", "Kasir API sedang menyiapkan container aplikasi.", "12 menit lalu", "info"],
-    ["Backup otomatis", "Database Toko Merdeka berhasil disimpan.", "3 jam lalu", "violet"],
-    ["SSL diperbarui", "Sertifikat *.apps.adecloud.id diperbarui otomatis.", "Kemarin, 02:10", "success"],
-    ["Project dihentikan", "Arsip Lama dihentikan secara manual oleh Ade.", "6 hari lalu", "warning"],
-  ].map(([title, copy, time, kind]) => <div key={title + time}><span className={`timeline-icon ${kind}`}>{kind === "success" ? <Check size={15} /> : kind === "info" ? <CloudUpload size={15} /> : kind === "violet" ? <Archive size={15} /> : <Square size={13} />}</span><div><strong>{title}</strong><p>{copy}</p><small>{time}</small></div></div>)}</div></section>;
+  const [filter, setFilter] = useState("all");
+  const [records, setRecords] = useState<ActivityRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { setLoading(true); void fetch(`/api/activity?type=${filter}`).then((response) => response.json()).then((data) => setRecords(data.activity ?? [])).finally(() => setLoading(false)); }, [filter]);
+  const filters = [["all", "Semua"], ["deployment", "Deployment"], ["backup", "Backup"], ["account", "Akun"], ["environment", "Environment"], ["resource", "Resource"], ["system", "Sistem"]];
+  const icon = (type: ActivityRecord["type"]) => type === "deployment" ? <CloudUpload size={15} /> : type === "backup" ? <Archive size={15} /> : type === "account" ? <ShieldCheck size={15} /> : type === "environment" ? <Settings size={15} /> : type === "resource" ? <Gauge size={15} /> : <Square size={13} />;
+  const tone = (type: ActivityRecord["type"]) => type === "backup" ? "violet" : type === "system" ? "warning" : type === "account" ? "success" : "info";
+  return <section className="panel activity-page"><div className="activity-filters">{filters.map(([id, label]) => <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>)}</div><div className="activity-feed">{loading ? <p className="user-empty">Memuat aktivitas...</p> : records.length ? records.map((record) => <div key={record.id}><span className={`timeline-icon ${tone(record.type)}`}>{icon(record.type)}</span><div><strong>{record.title}</strong><p>{record.detail}</p><small>{record.projectName ? `${record.projectName} · ` : ""}{relativeTime(record.createdAt)}</small></div></div>) : <div className="empty-state"><Activity size={28} /><h3>Belum ada aktivitas</h3><p>Tindakan pada project dan akun akan tercatat di sini.</p></div>}</div></section>;
 }
 
 function BackupsView({ compact = false, project, notify, canOperate = false }: { compact?: boolean; project?: Project; notify: (m: string) => void; canOperate?: boolean }) {
@@ -494,7 +516,7 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
 }
 
 function SettingsView({ notify, settings, onSave, onChangePassword, isAdmin }: { notify: (m: string) => void; settings: AppSettings; onSave: (s: AppSettings) => Promise<void>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<string | null>; isAdmin: boolean }) {
-  const [section, setSection] = useState<"server" | "domain" | "database" | "users" | "account">(isAdmin ? "server" : "account");
+  const [section, setSection] = useState<"server" | "executor" | "domain" | "database" | "users" | "account">(isAdmin ? "server" : "account");
   const [draft, setDraft] = useState(settings);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -511,6 +533,17 @@ function SettingsView({ notify, settings, onSave, onChangePassword, isAdmin }: {
     {section === "database" && <div className="settings-form"><label><span>Database default</span><select value={draft.defaultDatabase} onChange={(e) => update("defaultDatabase", e.target.value)}><option>MariaDB</option><option>PostgreSQL</option><option>Tanpa database</option></select></label><label><span>Versi default</span><input value={draft.databaseVersion} onChange={(e) => update("databaseVersion", e.target.value)} /></label><label><span>Retensi backup (hari)</span><input type="number" min="1" max="90" value={draft.backupRetention} onChange={(e) => update("backupRetention", Number(e.target.value))} /></label></div>}
     {section === "users" ? <UserManagement notify={notify} /> : section === "account" ? <form className="settings-form password-form" onSubmit={submitPassword}><label><span>Password saat ini</span><input required type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label><label><span>Password baru</span><input required type="password" minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password baru</span><input required type="password" minLength={8} value={confirmation} onChange={(e) => setConfirmation(e.target.value)} autoComplete="new-password" /></label><p className="password-help">Gunakan minimal 8 karakter. Setelah disimpan, semua sesi akun ini akan keluar.</p>{passwordError && <p className="login-error">{passwordError}</p>}<footer className="settings-footer"><button className="primary-btn" disabled={changingPassword}>{<KeyRound size={17} />}{changingPassword ? "Menyimpan..." : "Ubah password"}</button></footer></form> : <><div className="connection-card"><span className="timeline-icon success"><Check size={15} /></span><div><strong>{section === "domain" ? "Format domain valid" : section === "database" ? "Konfigurasi database siap" : "Koneksi server aktif"}</strong><p>{section === "domain" ? `Project baru akan memakai *.${draft.baseDomain}` : section === "database" ? `${draft.defaultDatabase} dipilih sebagai default` : "Docker belum terhubung di komputer lokal"}</p></div><button className="secondary-btn" onClick={() => notify(section === "domain" ? "Koneksi NPM berhasil diuji" : "Konfigurasi berhasil diuji")}>Uji konfigurasi</button></div><footer className="settings-footer"><button className="primary-btn" onClick={save}><Check size={17} />Simpan perubahan</button></footer></>}
   </section></div>;
+}
+
+function ExecutorSettings({ notify }: { notify: (message: string) => void }) {
+  const [url, setUrl] = useState("http://127.0.0.1:8787");
+  const [token, setToken] = useState("");
+  const [configured, setConfigured] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => { void fetch("/api/executor").then((response) => response.json()).then((data) => { if (data.executor) { setUrl(data.executor.url); setConfigured(data.executor.configured); } }); }, []);
+  const save = async () => { const response = await fetch("/api/executor", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ url, token }) }); const data = await response.json(); if (!response.ok) return setMessage(data.error || "Konfigurasi executor gagal disimpan."); setConfigured(true); setToken(""); setMessage("Konfigurasi executor tersimpan."); notify("Konfigurasi executor tersimpan"); };
+  const test = async () => { setMessage("Menguji koneksi executor..."); const response = await fetch("/api/executor", { method: "POST" }); const data = await response.json(); setMessage(response.ok ? `Executor siap (${data.health.mode}).` : (data.error || "Executor tidak dapat dijangkau.")); };
+  return <section className="executor-settings"><header className="executor-heading"><div className="executor-title"><span className={configured ? "executor-icon ready" : "executor-icon"}><Zap size={18} /></span><div><h2>Executor deployment</h2><p>Worker privat untuk menerima job dari panel.</p></div></div><div className={configured ? "executor-state ready" : "executor-state"}><i />{configured ? "Siap dikonfigurasi" : "Belum dihubungkan"}</div></header><div className="executor-fields"><label><span>Alamat executor</span><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="http://127.0.0.1:8787" /></label><label><span>Token akses <small>{configured ? "Kosongkan untuk mempertahankan token" : "Wajib untuk koneksi pertama"}</small></span><input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={configured ? "Token tersimpan dengan aman" : "Tempel EXECUTOR_TOKEN"} autoComplete="off" /></label></div>{message && <p className="executor-message">{message}</p>}<footer className="executor-actions"><button className="secondary-btn" onClick={() => void test()} disabled={!configured}>Uji koneksi</button><button className="primary-btn" onClick={() => void save()}><Check size={16} />Simpan konfigurasi</button></footer></section>;
 }
 
 function UserManagement({ notify }: { notify: (message: string) => void }) {
@@ -575,11 +608,17 @@ function CreateProjectModal({ onClose, onSubmit, baseDomain, defaultDatabase }: 
   </form></div></div>;
 }
 
+function InitialSetup({ onComplete }: { onComplete: () => void }) {
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [confirmation, setConfirmation] = useState(""); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
+  const submit = async (event: FormEvent) => { event.preventDefault(); if (password !== confirmation) return setError("Konfirmasi password belum sama."); setSaving(true); setError(""); const response = await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, password }) }); const result = await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Instalasi awal gagal."); onComplete(); };
+  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">INSTALASI AWAL</span><h1>Siapkan akses panel pertama.</h1><p>Buat akun Administrator untuk mengamankan workspace deployment Anda.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Pendaftaran sekali saja</strong><small>Setelah selesai, pengguna baru dikelola dari panel</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">ADMINISTRATOR</span><h2>Buat akun utama</h2><p>Gunakan email aktif dan password kuat untuk akses pertama.</p></div><label><span>Nama</span><input required value={name} onChange={(event) => setName(event.target.value)} autoFocus /></label><label><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Password</span><input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password</span><input required type="password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={saving}>{<ShieldCheck size={18} />}{saving ? "Menyiapkan akun..." : "Selesaikan instalasi"}</button></form></section></main>;
+}
+
 function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<string | null> }) {
-  const [email, setEmail] = useState("ade@nexdeploy.local");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 6) { setError("Masukkan email dan password minimal 6 karakter."); return; } setSubmitting(true); setError(""); const message = await onLogin(email, password); if (message) setError(message); setSubmitting(false); };
-  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel lokal terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Gunakan akun panel untuk mengakses fitur sesuai peran yang sudah ditetapkan.</p></div><label><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label><label><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={submitting}>{<LogIn size={18} />}{submitting ? "Memeriksa akun..." : "Masuk ke panel"}</button><small className="login-note">Akun awal lokal: ade@nexdeploy.local / admin123. Ganti password sebelum digunakan di VPS.</small></form></section></main>;
+  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Gunakan akun panel untuk mengakses fitur sesuai peran yang sudah ditetapkan.</p></div><label><span>Email</span><input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label><label><span>Password</span><input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={submitting}>{<LogIn size={18} />}{submitting ? "Memeriksa akun..." : "Masuk ke panel"}</button></form></section></main>;
 }

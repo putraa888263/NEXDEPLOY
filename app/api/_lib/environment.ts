@@ -5,7 +5,8 @@ function bytesToBase64(bytes: Uint8Array) { return btoa(String.fromCharCode(...b
 function base64ToBytes(value: string) { return Uint8Array.from(atob(value), (character) => character.charCodeAt(0)); }
 
 async function encryptionKey() {
-  const material = await crypto.subtle.digest("SHA-256", encoder.encode("nexdeploy-local-environment-v1"));
+  const value = process.env.NEXDEPLOY_ENCRYPTION_KEY || "nexdeploy-local-environment-v1";
+  const material = await crypto.subtle.digest("SHA-256", encoder.encode(value));
   return crypto.subtle.importKey("raw", material, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 

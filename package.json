@@ -9,12 +9,14 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
+    "executor:dev": "node --watch executor/src/index.mjs",
+    "executor:start": "node executor/src/index.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@cloudflare/unenv-preset": "file:cloudflare-unenv-preset-2.16.1.tgz",
+    "@cloudflare/unenv-preset": "2.16.1",
     "@rolldown/binding-win32-x64-msvc": "^1.2.3",
     "drizzle-orm": "0.45.2",
     "lucide-react": "^1.31.0",

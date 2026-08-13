@@ -13,19 +13,17 @@ npm run dev
 
 Buka `http://localhost:3000`.
 
-Pada pemakaian pertama, database lokal akan disiapkan otomatis. Tiga akun Administrator awal dibuat otomatis. Ganti seluruh password sebelum panel dipakai di VPS:
-
-```text
-ade@nexdeploy.local    / admin123
-reza@nexdeploy.local   / admin123
-ikbal@nexdeploy.local  / admin123
-```
+Pada pemakaian pertama, database akan disiapkan otomatis dan halaman instalasi awal akan meminta Anda membuat akun Administrator. Tidak ada email atau password bawaan di paket produksi.
 
 ## Build
 
 ```bash
 npm run build
 ```
+
+## Menyiapkan VPS
+
+File `docker-compose.yml` menjalankan panel dan executor dalam jaringan privat. Ikuti [DEPLOY_VPS.md](DEPLOY_VPS.md) saat server siap. Jangan mempublikasikan port executor.
 
 ## Keamanan
 

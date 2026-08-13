@@ -12,7 +12,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!request.headers.get("content-type")?.startsWith("multipart/form-data")) return NextResponse.json({ error: "Pilih file ZIP aplikasi." }, { status: 400 });
   const form = await request.formData();
   const archive = form.get("archive");
-  if (!(archive instanceof File) || !archive.name.toLowerCase().endsWith(".zip")) return NextResponse.json({ error: "Pilih file ZIP aplikasi." }, { status: 400 });
+  // `File` is not exposed as a runtime global in every local Workers adapter.
+  if (typeof archive === "string" || !archive || !archive.name.toLowerCase().endsWith(".zip")) return NextResponse.json({ error: "Pilih file ZIP aplikasi." }, { status: 400 });
   if (!archive.size || archive.size > maxArchiveSize) return NextResponse.json({ error: "Ukuran ZIP harus antara 1 byte dan 100 MB pada panel lokal." }, { status: 400 });
   const project = await getD1().prepare("SELECT id, name, slug, framework FROM projects WHERE id = ?").bind(id).first<{ id: string; name: string; slug: string; framework: string }>();
   if (!project) return NextResponse.json({ error: "Project tidak ditemukan." }, { status: 404 });
@@ -22,8 +23,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "ZIP tidak dapat diperiksa." }, { status: 400 }); }
   const safeName = archive.name.replace(/[^a-zA-Z0-9._-]/g, "-");
   const key = `projects/${project.id}/${Date.now()}-${safeName}`;
-  try { await getUploads().put(key, archiveBytes, { httpMetadata: { contentType: "application/zip" }, customMetadata: { projectId: project.id, uploadedBy: user.id } }); }
-  catch { return NextResponse.json({ error: "ZIP lolos validasi, tetapi penyimpanan lokal tidak merespons. Jalankan ulang panel lalu coba lagi." }, { status: 503 }); }
+  try { await getUploads().put(key, new Uint8Array(archiveBytes), { httpMetadata: { contentType: "application/zip" }, customMetadata: { projectId: project.id, uploadedBy: user.id } }); }
+  catch (error) {
+    console.error("Gagal menyimpan ZIP ke R2 lokal", error);
+    const reason = error instanceof Error && error.message ? ` (${error.message})` : "";
+    return NextResponse.json({ error: `ZIP lolos validasi, tetapi penyimpanan lokal tidak merespons${reason}. Jalankan ulang panel lalu coba lagi.` }, { status: 503 });
+  }
   const now = new Date().toISOString();
   await getD1().batch([
     getD1().prepare("UPDATE projects SET archive_key = ?, archive_name = ?, archive_size = ?, archive_validation = ?, updated_at = ? WHERE id = ?").bind(key, archive.name, archive.size, JSON.stringify(validation), now, project.id),

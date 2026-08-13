@@ -2,6 +2,7 @@ const centralDirectorySignature = 0x02014b50;
 const endOfDirectorySignature = 0x06054b50;
 const storedMethod = 0;
 const deflatedMethod = 8;
+const maxArchiveEntries = 50000;
 
 function stripCommonRoot(entries: string[]) {
   const roots = entries.filter((entry) => entry.includes("/")).map((entry) => entry.split("/")[0]);
@@ -23,7 +24,7 @@ function readZipEntries(bytes: ArrayBuffer) {
   if (endOffset < 0) throw new Error("Direktori ZIP tidak ditemukan.");
   const entriesCount = data.getUint16(endOffset + 10, true);
   let offset = data.getUint32(endOffset + 16, true);
-  if (entriesCount > 10000) throw new Error("ZIP memuat terlalu banyak file.");
+  if (entriesCount > maxArchiveEntries) throw new Error("ZIP memuat terlalu banyak file. Maksimal 50.000 file per arsip.");
   const decoder = new TextDecoder();
   const entries: ZipEntry[] = [];
   for (let index = 0; index < entriesCount; index += 1) {
