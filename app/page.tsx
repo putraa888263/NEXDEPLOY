@@ -19,6 +19,7 @@ import {
   Gauge,
   Globe2,
   HardDrive,
+  KeyRound,
   LogIn,
   LogOut,
   LayoutDashboard,
@@ -58,13 +59,14 @@ type AppSettings = {
 };
 
 type Project = {
+  id: string;
   name: string;
   slug: string;
   domain: string;
   framework: string;
   version: string;
   status: ProjectStatus;
-  updated: string;
+  updatedAt: string;
   cpu: number;
   memory: number;
   color: string;
@@ -72,15 +74,10 @@ type Project = {
 };
 
 type ProjectDraft = { name: string; framework: string; database: DatabaseType; fileName: string };
+type PanelUser = { id: string; name: string; email: string; role: Role; status: "Active" | "Disabled"; lastLoginAt: string | null; createdAt: string };
+type SignedInUser = { id: string; name: string; email: string; role: Role };
 
 const defaultSettings: AppSettings = { serverName: "VPS Utama", serverIp: "103.127.96.42", location: "Jakarta", projectDirectory: "/opt/nexdeploy/projects", baseDomain: "apps.adecloud.id", npmUrl: "http://103.127.96.42:81", sslEmail: "admin@adecloud.id", defaultDatabase: "MariaDB", databaseVersion: "11.4", backupRetention: 7 };
-
-const initialProjects: Project[] = [
-  { name: "NexBill", slug: "nexbill", domain: "nexbill.apps.adecloud.id", framework: "Laravel", version: "v1.8.2", status: "Healthy", updated: "4 menit lalu", cpu: 12, memory: 38, color: "#2563eb" },
-  { name: "Toko Merdeka", slug: "toko-merdeka", domain: "toko-merdeka.apps.adecloud.id", framework: "Laravel", version: "v2.4.0", status: "Healthy", updated: "2 jam lalu", cpu: 8, memory: 29, color: "#db2777" },
-  { name: "Kasir API", slug: "kasir-api", domain: "kasir-api.apps.adecloud.id", framework: "PHP Native", version: "v0.9.7", status: "Deploying", updated: "sedang berjalan", cpu: 34, memory: 44, color: "#7c3aed" },
-  { name: "Arsip Lama", slug: "arsip-lama", domain: "arsip-lama.apps.adecloud.id", framework: "Laravel", version: "v1.1.3", status: "Stopped", updated: "6 hari lalu", cpu: 0, memory: 0, color: "#64748b" },
-];
 
 const logLines = [
   ["14:32:08", "Mengunggah arsip aplikasi", "done"],
@@ -108,11 +105,21 @@ function ProjectMark({ project, small = false }: { project: Project; small?: boo
   return <span className={`project-mark ${small ? "small" : ""}`} style={{ background: project.color }}>{project.name.slice(0, 2).toUpperCase()}</span>;
 }
 
+function relativeTime(value: string) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000));
+  if (minutes < 1) return "baru saja";
+  if (minutes < 60) return `${minutes} menit lalu`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} jam lalu`;
+  return `${Math.floor(hours / 24)} hari lalu`;
+}
+
 export default function Home() {
   const [view, setView] = useState<View>("dashboard");
-  const [projects, setProjects] = useState(initialProjects);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [settings, setSettings] = useState(defaultSettings);
   const [role, setRole] = useState<Role | null>(null);
+  const [signedInUser, setSignedInUser] = useState<SignedInUser | null>(null);
   const [ready, setReady] = useState(false);
   const [selected, setSelected] = useState<Project | null>(null);
   const [detailTab, setDetailTab] = useState("overview");
@@ -122,19 +129,23 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState("");
 
-  useEffect(() => {
-    try {
-      const savedProjects = localStorage.getItem("nexdeploy.projects");
-      const savedSettings = localStorage.getItem("nexdeploy.settings");
-      const savedRole = sessionStorage.getItem("nexdeploy.role") as Role | null;
-      if (savedProjects) setProjects(JSON.parse(savedProjects));
-      if (savedSettings) setSettings({ ...defaultSettings, ...JSON.parse(savedSettings) });
-      if (savedRole) setRole(savedRole);
-    } finally { setReady(true); }
-  }, []);
+  async function loadPanel() {
+    const [projectResponse, settingsResponse] = await Promise.all([fetch("/api/projects"), fetch("/api/settings")]);
+    if (!projectResponse.ok || !settingsResponse.ok) throw new Error("Gagal memuat data panel.");
+    const [projectData, settingsData] = await Promise.all([projectResponse.json(), settingsResponse.json()]);
+    setProjects(projectData.projects);
+    setSettings({ ...defaultSettings, ...settingsData.settings });
+  }
 
-  useEffect(() => { if (ready) localStorage.setItem("nexdeploy.projects", JSON.stringify(projects)); }, [projects, ready]);
-  useEffect(() => { if (ready) localStorage.setItem("nexdeploy.settings", JSON.stringify(settings)); }, [settings, ready]);
+  useEffect(() => {
+    fetch("/api/auth/session").then(async (response) => {
+      if (!response.ok) return;
+      const { user } = await response.json();
+      setRole(user.role as Role);
+      setSignedInUser(user as SignedInUser);
+      await loadPanel();
+    }).catch(() => undefined).finally(() => setReady(true));
+  }, []);
 
   const filtered = useMemo(() => projects.filter((project) => {
     const matchesQuery = `${project.name} ${project.domain}`.toLowerCase().includes(query.toLowerCase());
@@ -153,26 +164,53 @@ export default function Home() {
     setMenuOpen(false);
   }
 
-  function toggleProject(project: Project) {
+  async function toggleProject(project: Project) {
     const nextStatus: ProjectStatus = project.status === "Stopped" ? "Healthy" : "Stopped";
-    setProjects((items) => items.map((item) => item.slug === project.slug ? { ...item, status: nextStatus, cpu: nextStatus === "Stopped" ? 0 : 7, memory: nextStatus === "Stopped" ? 0 : 26 } : item));
-    setSelected((current) => current ? { ...current, status: nextStatus, cpu: nextStatus === "Stopped" ? 0 : 7, memory: nextStatus === "Stopped" ? 0 : 26 } : current);
+    const response = await fetch(`/api/projects/${project.id}/status`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: nextStatus }) });
+    if (!response.ok) return notify("Status project gagal diubah");
+    const update = await response.json();
+    setProjects((items) => items.map((item) => item.id === project.id ? { ...item, ...update } : item));
+    setSelected((current) => current?.id === project.id ? { ...current, ...update } : current);
     notify(nextStatus === "Healthy" ? "Project berhasil dijalankan" : "Project berhasil dihentikan");
   }
 
-  function createProject(draft: ProjectDraft) {
-    const name = draft.name.trim();
-    const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    const uniqueSlug = projects.some((item) => item.slug === slug) ? `${slug}-${Date.now().toString().slice(-4)}` : slug;
-    const project: Project = { name, slug: uniqueSlug, domain: `${uniqueSlug}.${settings.baseDomain}`, framework: draft.framework, database: draft.database, version: "v1.0.0", status: "Deploying", updated: "baru saja", cpu: 21, memory: 18, color: "#0891b2" };
-    setProjects((items) => [project, ...items]);
+  async function createProject(draft: ProjectDraft) {
+    const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
+    const result = await response.json();
+    if (!response.ok) return notify(result.error || "Project gagal dibuat");
+    setProjects((items) => [result.project, ...items]);
     setModalOpen(false);
     setView("projects");
-    notify(`${name} dibuat dari ${draft.fileName}`);
+    notify(`${result.project.name} dibuat. Upload ZIP akan dilanjutkan pada worker deployment.`);
   }
 
-  function login(nextRole: Role) { setRole(nextRole); sessionStorage.setItem("nexdeploy.role", nextRole); }
-  function logout() { setRole(null); sessionStorage.removeItem("nexdeploy.role"); setSelected(null); setView("dashboard"); }
+  async function login(email: string, password: string) {
+    const response = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
+    const result = await response.json();
+    if (!response.ok) return result.error || "Login gagal.";
+    setRole(result.user.role as Role);
+    setSignedInUser(result.user as SignedInUser);
+    await loadPanel();
+    return null;
+  }
+  async function saveSettings(nextSettings: AppSettings) {
+    const response = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(nextSettings) });
+    if (!response.ok) return notify("Pengaturan gagal disimpan");
+    setSettings(nextSettings);
+    notify("Pengaturan berhasil disimpan");
+  }
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const response = await fetch("/api/account/password", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
+    const result = await response.json();
+    if (!response.ok) return result.error || "Password gagal diubah.";
+    setRole(null);
+    setSignedInUser(null);
+    setProjects([]);
+    setSelected(null);
+    setView("dashboard");
+    return null;
+  }
+  async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setRole(null); setSignedInUser(null); setProjects([]); setSelected(null); setView("dashboard"); }
 
   if (!ready) return <div className="auth-loading">Menyiapkan NEXDEPLOY...</div>;
   if (!role) return <LoginScreen onLogin={login} />;
@@ -180,7 +218,8 @@ export default function Home() {
   const canOperate = role !== "Viewer";
   const isAdmin = role === "Administrator";
 
-  const pageTitle = view === "dashboard" ? "Selamat siang, Ade" : view === "projects" ? "Semua project" : view === "activity" ? "Aktivitas deployment" : view === "backups" ? "Backup & pemulihan" : "Pengaturan";
+  const pageTitle = view === "dashboard" ? `Selamat siang, ${signedInUser?.name ?? "Pengguna"}` : view === "projects" ? "Semua project" : view === "activity" ? "Aktivitas deployment" : view === "backups" ? "Backup & pemulihan" : "Pengaturan";
+  const avatarInitials = signedInUser?.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() ?? "US";
 
   return (
     <div className="app-shell">
@@ -200,7 +239,7 @@ export default function Home() {
           <div className="mini-meter"><span style={{ width: "42%" }} /></div>
           <div className="server-meta"><span>42% terpakai</span><span>64 GB</span></div>
         </div>
-        <button className="profile profile-button" onClick={logout} title="Keluar"><span className="avatar">AD</span><div><strong>Ade</strong><small>{role}</small></div><LogOut size={16} /></button>
+        <button className="profile profile-button" onClick={logout} title="Keluar"><span className="avatar">{avatarInitials}</span><div><strong>{signedInUser?.name}</strong><small>{role}</small></div><LogOut size={16} /></button>
       </aside>
 
       {menuOpen && <button className="scrim" aria-label="Tutup menu" onClick={() => setMenuOpen(false)} />}
@@ -229,7 +268,7 @@ export default function Home() {
               {view === "projects" && <ProjectsView projects={filtered} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} openProject={setSelected} openModal={() => setModalOpen(true)} canOperate={canOperate} />}
               {view === "activity" && <ActivityView />}
               {view === "backups" && <BackupsView notify={notify} />}
-              {view === "settings" && isAdmin && <SettingsView notify={notify} settings={settings} onSave={setSettings} />}
+              {view === "settings" && isAdmin && <SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} />}
             </>
           )}
         </div>
@@ -268,7 +307,7 @@ function Dashboard({ projects, openProject, goProjects }: { projects: Project[];
         <div className="panel-head"><div><h2>Project kamu</h2><p>Status aplikasi terbaru</p></div><button className="text-btn" onClick={goProjects}>Lihat semua <ChevronLeft size={15} className="rotate" /></button></div>
         <div className="project-list">
           {projects.slice(0, 4).map((project) => <button className="project-row" key={project.slug} onClick={() => openProject(project)}>
-            <ProjectMark project={project} /><div className="project-main"><strong>{project.name}</strong><span>{project.domain}</span></div><div className="project-tech"><b>{project.framework}</b><span>{project.version}</span></div><StatusPill status={project.status} /><div className="updated"><Clock3 size={14} />{project.updated}</div><ChevronLeft size={17} className="rotate" />
+            <ProjectMark project={project} /><div className="project-main"><strong>{project.name}</strong><span>{project.domain}</span></div><div className="project-tech"><b>{project.framework}</b><span>{project.version}</span></div><StatusPill status={project.status} /><div className="updated"><Clock3 size={14} />{relativeTime(project.updatedAt)}</div><ChevronLeft size={17} className="rotate" />
           </button>)}
         </div>
       </div>
@@ -291,7 +330,7 @@ function Dashboard({ projects, openProject, goProjects }: { projects: Project[];
 function ProjectsView({ projects, query, setQuery, filter, setFilter, openProject, openModal, canOperate }: { projects: Project[]; query: string; setQuery: (v: string) => void; filter: string; setFilter: (v: string) => void; openProject: (p: Project) => void; openModal: () => void; canOperate: boolean }) {
   return <div className="panel projects-page">
     <div className="project-toolbar"><label className="search-box"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama atau domain..." /></label><div className="filters">{["Semua", "Berjalan", "Deploying", "Berhenti"].map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div></div>
-    {projects.length ? <div className="project-cards">{projects.map((project) => <article key={project.slug} className="project-card" onClick={() => openProject(project)}><div className="card-top"><ProjectMark project={project} /><StatusPill status={project.status} /></div><h3>{project.name}</h3><p>{project.domain}</p><div className="card-details"><span><Box size={16} />{project.framework}</span><span><Database size={16} />{project.database || "MariaDB"}</span></div><div className="resource-line"><span>CPU <b>{project.cpu}%</b></span><span>Memory <b>{project.memory}%</b></span></div><div className="dual-meter"><i style={{width: `${project.cpu}%`}} /><i style={{width: `${project.memory}%`}} /></div><footer><span><Clock3 size={14} />{project.updated}</span><button aria-label={`Buka ${project.name}`}><ExternalLink size={16} /></button></footer></article>)}</div> : <div className="empty-state"><Search size={26} /><h3>Project tidak ditemukan</h3><p>Coba kata pencarian atau status yang berbeda.</p>{canOperate && <button className="secondary-btn" onClick={openModal}>Buat project baru</button>}</div>}
+    {projects.length ? <div className="project-cards">{projects.map((project) => <article key={project.id} className="project-card" onClick={() => openProject(project)}><div className="card-top"><ProjectMark project={project} /><StatusPill status={project.status} /></div><h3>{project.name}</h3><p>{project.domain}</p><div className="card-details"><span><Box size={16} />{project.framework}</span><span><Database size={16} />{project.database || "MariaDB"}</span></div><div className="resource-line"><span>CPU <b>{project.cpu}%</b></span><span>Memory <b>{project.memory}%</b></span></div><div className="dual-meter"><i style={{width: `${project.cpu}%`}} /><i style={{width: `${project.memory}%`}} /></div><footer><span><Clock3 size={14} />{relativeTime(project.updatedAt)}</span><button aria-label={`Buka ${project.name}`}><ExternalLink size={16} /></button></footer></article>)}</div> : <div className="empty-state"><Search size={26} /><h3>Project tidak ditemukan</h3><p>Coba kata pencarian atau status yang berbeda.</p>{canOperate && <button className="secondary-btn" onClick={openModal}>Buat project baru</button>}</div>}
   </div>;
 }
 
@@ -357,19 +396,74 @@ function BackupsView({ compact = false, notify }: { compact?: boolean; notify: (
   return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>{compact ? "Backup project" : "Backup terbaru"}</h2><p>File aplikasi dan database tersimpan bersama.</p></div><button className="primary-btn" onClick={() => notify("Backup baru sedang dibuat")}><Plus size={17} />Buat backup</button></div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Project</span><span>Ukuran</span><span>Dibuat</span><span /></div>{[["automatic-2026-08-12", "NexBill", "186 MB", "Hari ini, 02:00"], ["before-v1.8.2", "NexBill", "181 MB", "4 menit lalu"], ["automatic-2026-08-12", "Toko Merdeka", "244 MB", "Hari ini, 02:04"], ["weekly-2026-w32", "Kasir API", "92 MB", "3 hari lalu"]].map(([name, project, size, date]) => <div className="table-row" key={name + project}><span className="backup-name"><Archive size={17} /><strong>{name}</strong></span><span>{project}</span><span>{size}</span><span>{date}</span><button className="restore-btn" onClick={() => notify(`Pemulihan ${project} disiapkan`)}><RotateCcw size={15} />Pulihkan</button></div>)}</div></section>;
 }
 
-function SettingsView({ notify, settings, onSave }: { notify: (m: string) => void; settings: AppSettings; onSave: (s: AppSettings) => void }) {
-  const [section, setSection] = useState<"server" | "domain" | "database">("server");
+function SettingsView({ notify, settings, onSave, onChangePassword }: { notify: (m: string) => void; settings: AppSettings; onSave: (s: AppSettings) => Promise<void>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<string | null> }) {
+  const [section, setSection] = useState<"server" | "domain" | "database" | "users" | "account">("server");
   const [draft, setDraft] = useState(settings);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
   const update = (key: keyof AppSettings, value: string | number) => setDraft((current) => ({ ...current, [key]: value }));
-  const save = () => { onSave(draft); notify("Pengaturan berhasil disimpan"); };
-  return <div className="settings-grid"><aside className="settings-menu"><button className={section === "server" ? "active" : ""} onClick={() => setSection("server")}><Server size={17} />Server</button><button className={section === "domain" ? "active" : ""} onClick={() => setSection("domain")}><Globe2 size={17} />Domain & SSL</button><button className={section === "database" ? "active" : ""} onClick={() => setSection("database")}><Database size={17} />Database</button></aside><section className="panel settings-panel">
-    <div className="panel-head"><div><h2>{section === "server" ? "Konfigurasi server" : section === "domain" ? "Domain & SSL" : "Default database"}</h2><p>{section === "server" ? "Informasi VPS yang digunakan oleh NEXDEPLOY." : section === "domain" ? "Domain ini dipakai otomatis oleh setiap project baru." : "Tentukan database awal dan kebijakan backup."}</p></div></div>
+  const save = () => { void onSave(draft); };
+  const submitPassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (newPassword !== confirmation) return setPasswordError("Konfirmasi password belum sama."); setChangingPassword(true); setPasswordError(""); const message = await onChangePassword(currentPassword, newPassword); if (message) setPasswordError(message); else notify("Password berhasil diubah. Silakan masuk kembali."); setChangingPassword(false); };
+  return <div className="settings-grid"><aside className="settings-menu"><button className={section === "server" ? "active" : ""} onClick={() => setSection("server")}><Server size={17} />Server</button><button className={section === "domain" ? "active" : ""} onClick={() => setSection("domain")}><Globe2 size={17} />Domain & SSL</button><button className={section === "database" ? "active" : ""} onClick={() => setSection("database")}><Database size={17} />Database</button><button className={section === "users" ? "active" : ""} onClick={() => setSection("users")}><ShieldCheck size={17} />Pengguna</button><button className={section === "account" ? "active" : ""} onClick={() => setSection("account")}><KeyRound size={17} />Akun</button></aside><section className="panel settings-panel">
+    <div className="panel-head"><div><h2>{section === "server" ? "Konfigurasi server" : section === "domain" ? "Domain & SSL" : section === "database" ? "Default database" : section === "users" ? "Pengguna & akses" : "Keamanan akun"}</h2><p>{section === "server" ? "Informasi VPS yang digunakan oleh NEXDEPLOY." : section === "domain" ? "Domain ini dipakai otomatis oleh setiap project baru." : section === "database" ? "Tentukan database awal dan kebijakan backup." : section === "users" ? "Buat akun dan atur akses anggota tim." : "Perbarui password untuk menjaga akses panel tetap aman."}</p></div></div>
     {section === "server" && <div className="settings-form"><label><span>Nama server</span><input value={draft.serverName} onChange={(e) => update("serverName", e.target.value)} /></label><label><span>Alamat IP</span><input value={draft.serverIp} onChange={(e) => update("serverIp", e.target.value)} /></label><label><span>Lokasi</span><select value={draft.location} onChange={(e) => update("location", e.target.value)}><option>Jakarta</option><option>Singapore</option></select></label><label><span>Direktori project</span><input value={draft.projectDirectory} onChange={(e) => update("projectDirectory", e.target.value)} /></label></div>}
     {section === "domain" && <div className="settings-form"><label><span>Base domain</span><input value={draft.baseDomain} onChange={(e) => update("baseDomain", e.target.value.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, ""))} placeholder="apps.domain.com" /></label><label><span>URL Nginx Proxy Manager</span><input value={draft.npmUrl} onChange={(e) => update("npmUrl", e.target.value)} /></label><label><span>Email SSL</span><input type="email" value={draft.sslEmail} onChange={(e) => update("sslEmail", e.target.value)} /></label><div className="domain-preview"><Globe2 size={18} /><div><span>Contoh alamat project</span><strong>nama-project.{draft.baseDomain}</strong></div></div></div>}
     {section === "database" && <div className="settings-form"><label><span>Database default</span><select value={draft.defaultDatabase} onChange={(e) => update("defaultDatabase", e.target.value)}><option>MariaDB</option><option>PostgreSQL</option><option>Tanpa database</option></select></label><label><span>Versi default</span><input value={draft.databaseVersion} onChange={(e) => update("databaseVersion", e.target.value)} /></label><label><span>Retensi backup (hari)</span><input type="number" min="1" max="90" value={draft.backupRetention} onChange={(e) => update("backupRetention", Number(e.target.value))} /></label></div>}
-    <div className="connection-card"><span className="timeline-icon success"><Check size={15} /></span><div><strong>{section === "domain" ? "Format domain valid" : section === "database" ? "Konfigurasi database siap" : "Koneksi server aktif"}</strong><p>{section === "domain" ? `Project baru akan memakai *.${draft.baseDomain}` : section === "database" ? `${draft.defaultDatabase} dipilih sebagai default` : "Docker Engine 27.3 · Terakhir diperiksa 1 menit lalu"}</p></div><button className="secondary-btn" onClick={() => notify(section === "domain" ? "Koneksi NPM berhasil diuji" : "Konfigurasi berhasil diuji")}>Uji konfigurasi</button></div>
-    <footer className="settings-footer"><button className="primary-btn" onClick={save}><Check size={17} />Simpan perubahan</button></footer>
+    {section === "users" ? <UserManagement notify={notify} /> : section === "account" ? <form className="settings-form password-form" onSubmit={submitPassword}><label><span>Password saat ini</span><input required type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label><label><span>Password baru</span><input required type="password" minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password baru</span><input required type="password" minLength={8} value={confirmation} onChange={(e) => setConfirmation(e.target.value)} autoComplete="new-password" /></label><p className="password-help">Gunakan minimal 8 karakter. Setelah disimpan, semua sesi akun ini akan keluar.</p>{passwordError && <p className="login-error">{passwordError}</p>}<footer className="settings-footer"><button className="primary-btn" disabled={changingPassword}>{<KeyRound size={17} />}{changingPassword ? "Menyimpan..." : "Ubah password"}</button></footer></form> : <><div className="connection-card"><span className="timeline-icon success"><Check size={15} /></span><div><strong>{section === "domain" ? "Format domain valid" : section === "database" ? "Konfigurasi database siap" : "Koneksi server aktif"}</strong><p>{section === "domain" ? `Project baru akan memakai *.${draft.baseDomain}` : section === "database" ? `${draft.defaultDatabase} dipilih sebagai default` : "Docker belum terhubung di komputer lokal"}</p></div><button className="secondary-btn" onClick={() => notify(section === "domain" ? "Koneksi NPM berhasil diuji" : "Konfigurasi berhasil diuji")}>Uji konfigurasi</button></div><footer className="settings-footer"><button className="primary-btn" onClick={save}><Check size={17} />Simpan perubahan</button></footer></>}
   </section></div>;
+}
+
+function UserManagement({ notify }: { notify: (message: string) => void }) {
+  const [users, setUsers] = useState<PanelUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "Operator" as Role });
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+
+  const loadUsers = async () => {
+    const response = await fetch("/api/users");
+    const result = await response.json();
+    if (!response.ok) { setError(result.error || "Daftar pengguna gagal dimuat."); return; }
+    setUsers(result.users);
+  };
+
+  useEffect(() => { void loadUsers().finally(() => setLoading(false)); }, []);
+
+  const createUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const response = await fetch("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
+    const result = await response.json();
+    if (!response.ok) return setError(result.error || "Akun gagal dibuat.");
+    setUsers((items) => [...items, result.user]);
+    setDraft({ name: "", email: "", password: "", role: "Operator" });
+    setError("");
+    notify(`Akun ${result.user.email} berhasil dibuat`);
+  };
+
+  const updateUser = async (user: PanelUser, changes: Partial<Pick<PanelUser, "role" | "status">>) => {
+    const response = await fetch(`/api/users/${user.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(changes) });
+    const result = await response.json();
+    if (!response.ok) return setError(result.error || "Akun gagal diperbarui.");
+    setUsers((items) => items.map((item) => item.id === user.id ? { ...item, ...result.user } : item));
+    setError("");
+    notify(`Akses ${user.email} diperbarui`);
+  };
+
+  const resetPassword = async (user: PanelUser) => {
+    const response = await fetch(`/api/users/${user.id}/reset-password`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: temporaryPassword }) });
+    const result = await response.json();
+    if (!response.ok) return setError(result.error || "Password gagal direset.");
+    setTemporaryPassword("");
+    setResetUserId(null);
+    setError("");
+    notify(`Password sementara ${user.email} sudah dibuat`);
+  };
+
+  return <div className="user-management"><form className="settings-form user-create-form" onSubmit={createUser}><label><span>Nama</span><input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Nama pengguna" /></label><label><span>Email</span><input required type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="nama@nexdeploy.local" /></label><label><span>Role</span><select value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}><option>Administrator</option><option>Operator</option><option>Viewer</option></select></label><label><span>Password awal</span><input required type="password" minLength={8} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} autoComplete="new-password" /></label><div className="user-form-action"><button className="primary-btn"><Plus size={17} />Tambah pengguna</button></div></form>{error && <p className="login-error user-error">{error}</p>}<div className="user-list">{loading ? <p className="user-empty">Memuat pengguna...</p> : users.map((user) => <article className="user-row" key={user.id}><div className="user-avatar">{user.name.slice(0, 2).toUpperCase()}</div><div className="user-identity"><strong>{user.name}</strong><span>{user.email}</span><small>{user.lastLoginAt ? `Terakhir masuk ${relativeTime(user.lastLoginAt)}` : "Belum pernah masuk"}</small></div><select aria-label={`Role ${user.name}`} value={user.role} onChange={(event) => void updateUser(user, { role: event.target.value as Role })}><option>Administrator</option><option>Operator</option><option>Viewer</option></select><button className={`user-status ${user.status === "Active" ? "active" : "disabled"}`} onClick={() => void updateUser(user, { status: user.status === "Active" ? "Disabled" : "Active" })}>{user.status === "Active" ? "Aktif" : "Nonaktif"}</button><button className="secondary-btn" onClick={() => { setResetUserId(resetUserId === user.id ? null : user.id); setTemporaryPassword(""); }}>Reset password</button>{resetUserId === user.id && <div className="reset-password"><input type="password" minLength={8} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} placeholder="Password sementara (min. 8)" /><button className="primary-btn" disabled={temporaryPassword.length < 8} onClick={() => void resetPassword(user)}>Simpan</button></div>}</article>)}</div></div>;
 }
 
 function CreateProjectModal({ onClose, onSubmit, baseDomain, defaultDatabase }: { onClose: () => void; onSubmit: (draft: ProjectDraft) => void; baseDomain: string; defaultDatabase: DatabaseType }) {
@@ -384,11 +478,11 @@ function CreateProjectModal({ onClose, onSubmit, baseDomain, defaultDatabase }: 
   </form></div></div>;
 }
 
-function LoginScreen({ onLogin }: { onLogin: (role: Role) => void }) {
-  const [selectedRole, setSelectedRole] = useState<Role>("Administrator");
+function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<string | null> }) {
   const [email, setEmail] = useState("ade@nexdeploy.local");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
-  const submit = (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 6) { setError("Masukkan email dan password minimal 6 karakter."); return; } onLogin(selectedRole); };
-  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel lokal terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Pilih role untuk menguji hak akses di lingkungan lokal.</p></div><label><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label><label><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><fieldset><legend>Masuk sebagai</legend><div className="role-options">{(["Administrator", "Operator", "Viewer"] as Role[]).map((item) => <button type="button" key={item} className={selectedRole === item ? "active" : ""} onClick={() => setSelectedRole(item)}><strong>{item}</strong><small>{item === "Administrator" ? "Akses penuh" : item === "Operator" ? "Kelola deployment" : "Pantau saja"}</small></button>)}</div></fieldset>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit"><LogIn size={18} />Masuk ke panel</button><small className="login-note">Mode lokal: kredensial contoh dapat diubah bebas.</small></form></section></main>;
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 6) { setError("Masukkan email dan password minimal 6 karakter."); return; } setSubmitting(true); setError(""); const message = await onLogin(email, password); if (message) setError(message); setSubmitting(false); };
+  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel lokal terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Gunakan akun panel untuk mengakses fitur sesuai peran yang sudah ditetapkan.</p></div><label><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label><label><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={submitting}>{<LogIn size={18} />}{submitting ? "Memeriksa akun..." : "Masuk ke panel"}</button><small className="login-note">Akun awal lokal: ade@nexdeploy.local / admin123. Ganti password sebelum digunakan di VPS.</small></form></section></main>;
 }

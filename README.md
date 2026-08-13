@@ -13,6 +13,14 @@ npm run dev
 
 Buka `http://localhost:3000`.
 
+Pada pemakaian pertama, database lokal akan disiapkan otomatis. Tiga akun Administrator awal dibuat otomatis. Ganti seluruh password sebelum panel dipakai di VPS:
+
+```text
+ade@nexdeploy.local    / admin123
+reza@nexdeploy.local   / admin123
+ikbal@nexdeploy.local  / admin123
+```
+
 ## Build
 
 ```bash
@@ -25,4 +33,6 @@ Jangan simpan password VPS, token API, private key, kredensial database, atau is
 
 ## Status
 
-Antarmuka, login role lokal, pembuatan project, dan penyimpanan konfigurasi lokal sudah tersedia. Integrasi backend untuk Docker, Nginx Proxy Manager, database container, upload ZIP, dan deployment worker masih perlu dihubungkan sebelum digunakan pada VPS produksi.
+Autentikasi berbasis sesi, penyimpanan project, status start/stop, dan pengaturan panel kini memakai database lokal. Skema database dan migrasinya tersedia di `db/` dan `drizzle/`.
+
+Tahap berikutnya adalah upload ZIP, worker deployment, Docker, Nginx Proxy Manager, provisioning database aplikasi, log deployment, dan backup. Fitur-fitur tersebut belum dihubungkan ke VPS produksi.
