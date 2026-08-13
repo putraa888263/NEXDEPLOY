@@ -71,11 +71,20 @@ type Project = {
   memory: number;
   color: string;
   database?: DatabaseType;
+  archiveName?: string | null;
+  archiveSize?: number | null;
+  archiveValidation?: string | null;
 };
 
-type ProjectDraft = { name: string; framework: string; database: DatabaseType; fileName: string };
+type ProjectDraft = { name: string; framework: string; database: DatabaseType; fileName: string; file?: File };
 type PanelUser = { id: string; name: string; email: string; role: Role; status: "Active" | "Disabled"; lastLoginAt: string | null; createdAt: string };
 type SignedInUser = { id: string; name: string; email: string; role: Role };
+type Deployment = { id: string; status: "Queued" | "Running" | "WaitingExecutor" | "Failed" | "Succeeded"; archiveName: string; executor: string; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null };
+type DeploymentLog = { id: string; level: "info" | "success" | "warning" | "error"; message: string; createdAt: string };
+type EnvironmentVariable = { key: string; value: string; isSecret: boolean; saved?: boolean };
+type ProjectResources = { phpVersion: string; cpuLimit: number; memoryLimit: number; diskQuota: number; internalPort: number; updatedAt?: string };
+type Backup = { id: string; name: string; type: string; status: string; size: number | null; retentionDays: number; createdAt: string; completedAt: string | null };
+type ArchiveValidation = { detectedFramework: string; files: number; readiness: "Ready" | "Warning"; warnings: string[]; requirements: { composer: boolean; phpVersion: string | null; laravelVersion: string | null; envExample: boolean; migrations: boolean; packageJson: boolean; buildScript: boolean } };
 
 const defaultSettings: AppSettings = { serverName: "VPS Utama", serverIp: "103.127.96.42", location: "Jakarta", projectDirectory: "/opt/nexdeploy/projects", baseDomain: "apps.adecloud.id", npmUrl: "http://103.127.96.42:81", sslEmail: "admin@adecloud.id", defaultDatabase: "MariaDB", databaseVersion: "11.4", backupRetention: 7 };
 
@@ -178,10 +187,51 @@ export default function Home() {
     const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
     const result = await response.json();
     if (!response.ok) return notify(result.error || "Project gagal dibuat");
+    const upload = new FormData();
+    const selectedFile = draft.file;
+    if (!selectedFile) return notify("Project dibuat, tetapi ZIP belum dipilih.");
+    upload.set("archive", selectedFile);
+    let uploadResponse: Response;
+    let uploadResult: { error?: string; archive?: { detectedFramework: string } };
+    try {
+      uploadResponse = await fetch(`/api/projects/${result.project.id}/upload`, { method: "POST", body: upload });
+      uploadResult = await uploadResponse.json().catch(() => ({}));
+    } catch {
+      setModalOpen(false);
+      setView("projects");
+      return notify("Upload terputus. Pastikan ZIP maksimal 100 MB lalu coba unggah ulang dari detail project.");
+    }
     setProjects((items) => [result.project, ...items]);
+    if (!uploadResponse.ok) {
+      setModalOpen(false);
+      setView("projects");
+      return notify(`Project dibuat, tetapi ZIP ditolak: ${uploadResult.error || "Terjadi kesalahan pada server lokal."}`);
+    }
     setModalOpen(false);
     setView("projects");
-    notify(`${result.project.name} dibuat. Upload ZIP akan dilanjutkan pada worker deployment.`);
+    notify(`${result.project.name} siap diproses. ZIP ${uploadResult.archive?.detectedFramework ?? "aplikasi"} sudah tervalidasi.`);
+  }
+  async function uploadProjectArchive(project: Project, file: File) {
+    const upload = new FormData();
+    upload.set("archive", file);
+    let response: Response;
+    let result: { error?: string; archive?: { name: string; size: number; detectedFramework: string } };
+    try { response = await fetch(`/api/projects/${project.id}/upload`, { method: "POST", body: upload }); result = await response.json().catch(() => ({})); }
+    catch { return notify("Upload terputus. Coba ulangi ZIP maksimal 100 MB."); }
+    if (!response.ok) return notify(result.error || "ZIP gagal diunggah.");
+    if (!result.archive) return notify("Respons upload tidak lengkap. Coba ulangi.");
+    const update = { archiveName: result.archive.name, archiveSize: result.archive.size, archiveValidation: JSON.stringify(result.archive), updatedAt: new Date().toISOString() };
+    setProjects((items) => items.map((item) => item.id === project.id ? { ...item, ...update } : item));
+    setSelected((current) => current?.id === project.id ? { ...current, ...update } : current);
+    notify(`ZIP ${result.archive.detectedFramework} berhasil tervalidasi.`);
+  }
+  async function deployProject(project: Project) {
+    const response = await fetch(`/api/projects/${project.id}/deployments`, { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) return notify(result.error || "Deployment gagal diantrikan.");
+    await loadPanel();
+    setSelected((current) => current?.id === project.id ? { ...current, status: "Stopped" } : current);
+    notify("Deployment diproses. Buka tab Deployment atau Log untuk melihat hasilnya.");
   }
 
   async function login(email: string, password: string) {
@@ -231,7 +281,7 @@ export default function Home() {
             <button key={id} className={view === id && !selected ? "active" : ""} onClick={() => goTo(id)}><Icon size={19} /><span>{label}</span>{id === "projects" && <b>{projects.length}</b>}</button>
           ))}
           <p className="nav-label secondary">Sistem</p>
-          {isAdmin && <button className={view === "settings" ? "active" : ""} onClick={() => goTo("settings")}><Settings size={19} /><span>Pengaturan</span></button>}
+          <button className={view === "settings" ? "active" : ""} onClick={() => goTo("settings")}><Settings size={19} /><span>Pengaturan</span></button>
         </nav>
         <div className="server-brief">
           <div className="server-heading"><span><i />VPS Utama</span><MoreHorizontal size={18} /></div>
@@ -256,7 +306,7 @@ export default function Home() {
 
         <div className="content-wrap">
           {selected ? (
-            <ProjectDetail project={selected} tab={detailTab} setTab={setDetailTab} onBack={() => setSelected(null)} onToggle={() => toggleProject(selected)} notify={notify} canOperate={canOperate} />
+            <ProjectDetail project={selected} tab={detailTab} setTab={setDetailTab} onBack={() => setSelected(null)} onToggle={() => toggleProject(selected)} onDeploy={() => deployProject(selected)} onUpload={(file) => uploadProjectArchive(selected, file)} notify={notify} canOperate={canOperate} />
           ) : (
             <>
               <div className="page-heading">
@@ -268,7 +318,7 @@ export default function Home() {
               {view === "projects" && <ProjectsView projects={filtered} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} openProject={setSelected} openModal={() => setModalOpen(true)} canOperate={canOperate} />}
               {view === "activity" && <ActivityView />}
               {view === "backups" && <BackupsView notify={notify} />}
-              {view === "settings" && isAdmin && <SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} />}
+              {view === "settings" && <SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} isAdmin={isAdmin} />}
             </>
           )}
         </div>
@@ -334,28 +384,31 @@ function ProjectsView({ projects, query, setQuery, filter, setFilter, openProjec
   </div>;
 }
 
-function ProjectDetail({ project, tab, setTab, onBack, onToggle, notify, canOperate }: { project: Project; tab: string; setTab: (tab: string) => void; onBack: () => void; onToggle: () => void; notify: (message: string) => void; canOperate: boolean }) {
-  const tabs = [["overview", "Ringkasan"], ["deployments", "Deployment"], ["environment", "Environment"], ["database", "Database"], ["backups", "Backup"], ["logs", "Log"]];
+function ProjectDetail({ project, tab, setTab, onBack, onToggle, onDeploy, onUpload, notify, canOperate }: { project: Project; tab: string; setTab: (tab: string) => void; onBack: () => void; onToggle: () => void; onDeploy: () => Promise<void>; onUpload: (file: File) => Promise<void>; notify: (message: string) => void; canOperate: boolean }) {
+  const tabs = [["overview", "Ringkasan"], ["deployments", "Deployment"], ["environment", "Environment"], ["resources", "Resource"], ["database", "Database"], ["backups", "Backup"], ["logs", "Log"]];
   return <>
     <button className="back-btn" onClick={onBack}><ChevronLeft size={18} />Kembali ke project</button>
     <section className="project-hero">
       <div className="project-identity"><ProjectMark project={project} /><div><div className="title-line"><h1>{project.name}</h1><StatusPill status={project.status} /></div><a href={`https://${project.domain}`} target="_blank" rel="noreferrer"><Globe2 size={15} />{project.domain}<ExternalLink size={13} /></a></div></div>
-      {canOperate && <div className="project-actions"><button className="secondary-btn" onClick={() => notify("Deployment ulang dimulai")}><RefreshCw size={17} />Deploy ulang</button><button className={project.status === "Stopped" ? "primary-btn" : "danger-btn"} onClick={onToggle}>{project.status === "Stopped" ? <Play size={17} /> : <Square size={16} fill="currentColor" />}{project.status === "Stopped" ? "Jalankan" : "Hentikan"}</button><button className="icon-btn bordered" title="Opsi lainnya"><MoreHorizontal size={19} /></button></div>}
+      {canOperate && <div className="project-actions"><label className="secondary-btn upload-replace"><CloudUpload size={17} />Unggah ZIP<input type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUpload(file); event.currentTarget.value = ""; }} /></label><button className="secondary-btn" disabled={!project.archiveName} onClick={() => void onDeploy()}><RefreshCw size={17} />Deploy ulang</button><button className={project.status === "Stopped" ? "primary-btn" : "danger-btn"} onClick={onToggle}>{project.status === "Stopped" ? <Play size={17} /> : <Square size={16} fill="currentColor" />}{project.status === "Stopped" ? "Jalankan" : "Hentikan"}</button></div>}
     </section>
     <div className="detail-tabs">{tabs.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}</div>
     {tab === "overview" && <OverviewTab project={project} notify={notify} />}
-    {tab === "deployments" && <DeploymentsTab />}
-    {tab === "environment" && <EnvironmentTab notify={notify} />}
+    {tab === "deployments" && <DeploymentsTab projectId={project.id} />}
+    {tab === "environment" && <EnvironmentTab project={project} notify={notify} canOperate={canOperate} />}
+    {tab === "resources" && <ResourcesTab project={project} notify={notify} canOperate={canOperate} />}
     {tab === "database" && <DatabaseTab project={project} notify={notify} canOperate={canOperate} />}
-    {tab === "backups" && <BackupsView compact notify={notify} />}
-    {tab === "logs" && <LogPanel />}
+    {tab === "backups" && <BackupsView compact project={project} notify={notify} canOperate={canOperate} />}
+    {tab === "logs" && <LogPanel projectId={project.id} />}
   </>;
 }
 
 function OverviewTab({ project, notify }: { project: Project; notify: (message: string) => void }) {
+  let validation: ArchiveValidation | null = null;
+  try { validation = project.archiveValidation ? JSON.parse(project.archiveValidation) as ArchiveValidation : null; } catch { validation = null; }
   return <div className="detail-grid"><div className="detail-main">
-    <section className="panel deployment-summary"><div className="panel-head"><div><h2>Deployment terakhir</h2><p>Versi aktif saat ini</p></div><span className="success-label"><Check size={15} />Berhasil</span></div><div className="release-row"><div className="release-icon"><FileArchive size={21} /></div><div><strong>{project.version}</strong><span>nexbill-release.zip · 18.4 MB</span></div><div><small>Selesai dalam</small><b>1m 03d</b></div><div><small>Di-deploy</small><b>4 menit lalu</b></div><button className="icon-btn subtle"><MoreHorizontal size={18} /></button></div></section>
-    <LogPanel compact />
+    <section className="panel deployment-summary"><div className="panel-head"><div><h2>Arsip aplikasi</h2><p>File yang akan diproses oleh worker deployment.</p></div><span className={project.archiveName && validation?.readiness !== "Warning" ? "success-label" : "status status-deploying"}>{project.archiveName ? validation?.readiness === "Warning" ? "Perlu perhatian" : <><Check size={15} />Tervalidasi</> : "Belum ada ZIP"}</span></div><div className="release-row"><div className="release-icon"><FileArchive size={21} /></div><div><strong>{project.archiveName ?? "Belum ada file aplikasi"}</strong><span>{project.archiveSize ? `${(project.archiveSize / 1024 / 1024).toFixed(2)} MB` : "Unggah ZIP Laravel atau PHP untuk melanjutkan."}</span></div><div><small>Framework</small><b>{validation?.detectedFramework ?? project.framework}</b></div><div><small>PHP</small><b>{validation?.requirements.phpVersion ?? "Tidak terdeteksi"}</b></div><button className="icon-btn subtle"><MoreHorizontal size={18} /></button></div>{validation && <div className="archive-readiness"><div><span>Composer</span><b>{validation.requirements.composer ? "Terdeteksi" : "Tidak ada"}</b></div><div><span>Migration</span><b>{validation.requirements.migrations ? "Terdeteksi" : "Tidak ada"}</b></div><div><span>Build frontend</span><b>{validation.requirements.buildScript ? "Tersedia" : "Tidak perlu / tidak ada"}</b></div>{validation.warnings.length > 0 && <ul>{validation.warnings.map((warning) => <li key={warning}><CircleAlert size={14} />{warning}</li>)}</ul>}</div>}</section>
+    <LogPanel compact projectId={project.id} />
   </div><aside className="detail-side">
     <section className="panel info-panel"><div className="panel-head"><div><h2>Informasi aplikasi</h2></div></div><dl><div><dt>Framework</dt><dd>{project.framework} 11</dd></div><div><dt>PHP</dt><dd>8.3</dd></div><div><dt>Container</dt><dd><i className="online-dot" />nexdeploy-{project.slug}-app</dd></div><div><dt>Database</dt><dd>MariaDB 11.4</dd></div><div><dt>Auto SSL</dt><dd><ShieldCheck size={15} />Aktif</dd></div></dl></section>
     <section className="panel resource-panel"><div className="panel-head"><div><h2>Penggunaan resource</h2><p>Rata-rata 15 menit</p></div></div><div className="resource-item"><span><Gauge size={17} />CPU <b>{project.cpu}%</b></span><div><i style={{width: `${project.cpu}%`}} /></div></div><div className="resource-item"><span><Database size={17} />Memory <b>{project.memory}%</b></span><div><i style={{width: `${project.memory}%`}} /></div></div><div className="resource-item"><span><HardDrive size={17} />Disk <b>31%</b></span><div><i style={{width: "31%"}} /></div></div></section>
@@ -363,16 +416,53 @@ function OverviewTab({ project, notify }: { project: Project; notify: (message: 
   </aside></div>;
 }
 
-function LogPanel({ compact = false }: { compact?: boolean }) {
-  return <section className={`panel log-panel ${compact ? "compact" : ""}`}><div className="panel-head dark"><div><h2>Log deployment</h2><p>nexbill · {compact ? "Deployment terbaru" : "Live output"}</p></div><span><i />Live</span></div><div className="terminal">{logLines.map(([time, line, status]) => <p key={line}><time>{time}</time><span className={status}>{status === "success" ? "SUCCESS" : "DONE"}</span><code>{line}</code></p>)}</div>{compact && <button className="terminal-footer">Lihat log lengkap <ExternalLink size={14} /></button>}</section>;
+function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId: string }) {
+  const [deployment, setDeployment] = useState<Deployment | null>(null);
+  const [logs, setLogs] = useState<DeploymentLog[]>([]);
+  useEffect(() => { void (async () => { const history = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()); const latest = history.deployments?.[0] as Deployment | undefined; if (!latest) return; setDeployment(latest); const output = await fetch(`/api/deployments/${latest.id}/logs`).then((response) => response.json()); setLogs(output.logs ?? []); })(); }, [projectId]);
+  return <section className={`panel log-panel ${compact ? "compact" : ""}`}><div className="panel-head dark"><div><h2>Log deployment</h2><p>{deployment ? deployment.archiveName : "Belum ada deployment"}</p></div><span><i />{deployment?.status ?? "Menunggu"}</span></div><div className="terminal">{logs.length ? logs.map((log) => <p key={log.id}><time>{new Date(log.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span className={log.level === "success" ? "success" : log.level === "warning" ? "done" : log.level === "error" ? "error" : "done"}>{log.level.toUpperCase()}</span><code>{log.message}</code></p>) : <p><code>Belum ada log deployment untuk project ini.</code></p>}</div>{compact && <button className="terminal-footer">Lihat log lengkap <ExternalLink size={14} /></button>}</section>;
 }
 
-function DeploymentsTab() {
-  return <section className="panel table-panel"><div className="panel-head"><div><h2>Riwayat deployment</h2><p>Lima versi terbaru aplikasi</p></div></div><div className="data-table"><div className="table-row head"><span>Versi</span><span>Status</span><span>Durasi</span><span>Waktu</span><span /></div>{["v1.8.2", "v1.8.1", "v1.8.0", "v1.7.6"].map((v, i) => <div className="table-row" key={v}><strong>{v}</strong><span className="success-label"><Check size={14} />Berhasil</span><span>{i === 0 ? "1m 03d" : "58 detik"}</span><span>{i === 0 ? "4 menit lalu" : `${i + 1} hari lalu`}</span><button className="icon-btn subtle"><MoreHorizontal size={17} /></button></div>)}</div></section>;
+function DeploymentsTab({ projectId }: { projectId: string }) {
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  useEffect(() => { void fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()).then((data) => setDeployments(data.deployments ?? [])); }, [projectId]);
+  return <section className="panel table-panel"><div className="panel-head"><div><h2>Riwayat deployment</h2><p>Antrean dan hasil worker terbaru.</p></div></div><div className="data-table"><div className="table-row head"><span>Arsip</span><span>Status</span><span>Executor</span><span>Waktu</span><span /></div>{deployments.length ? deployments.map((deployment) => <div className="table-row" key={deployment.id}><strong>{deployment.archiveName}</strong><span className={deployment.status === "WaitingExecutor" ? "status status-deploying" : deployment.status === "Failed" ? "status status-stopped" : "success-label"}>{deployment.status === "WaitingExecutor" ? "Menunggu executor" : deployment.status}</span><span>{deployment.executor}</span><span>{relativeTime(deployment.createdAt)}</span><button className="icon-btn subtle" title={deployment.error ?? "Detail deployment"}><MoreHorizontal size={17} /></button></div>) : <div className="empty-state"><FileArchive size={26} /><h3>Belum ada deployment</h3><p>Unggah ZIP lalu pilih Deploy ulang.</p></div>}</div></section>;
 }
 
-function EnvironmentTab({ notify }: { notify: (m: string) => void }) {
-  return <section className="panel form-panel"><div className="panel-head"><div><h2>Environment variables</h2><p>Nilai sensitif disembunyikan dan tersimpan terenkripsi.</p></div><button className="primary-btn" onClick={() => notify("Perubahan environment disimpan")}><Check size={17} />Simpan</button></div><div className="env-list">{[["APP_NAME", "NexBill"], ["APP_ENV", "production"], ["APP_DEBUG", "false"], ["DB_HOST", "nexdeploy-nexbill-db"], ["DB_PASSWORD", "••••••••••••"]].map(([key, value]) => <div key={key}><input value={key} readOnly aria-label="Nama variable" /><input defaultValue={value} aria-label={`Nilai ${key}`} /><button className="icon-btn subtle" title="Hapus"><X size={16} /></button></div>)}</div><button className="add-variable"><Plus size={16} />Tambah variable</button></section>;
+function EnvironmentTab({ project, notify, canOperate }: { project: Project; notify: (m: string) => void; canOperate: boolean }) {
+  const [entries, setEntries] = useState<EnvironmentVariable[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { void fetch(`/api/projects/${project.id}/environment`).then((response) => response.json()).then((data) => { if (data.environment) setEntries(data.environment); else setError(data.error || "Environment gagal dimuat."); }).catch(() => setError("Environment gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
+  const update = (index: number, changes: Partial<EnvironmentVariable>) => setEntries((items) => items.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry));
+  const generateAppKey = async () => {
+    const key = `base64:${btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))}`;
+    const index = entries.findIndex((entry) => entry.key === "APP_KEY");
+    if (index >= 0) update(index, { value: key, isSecret: true }); else setEntries((items) => [...items, { key: "APP_KEY", value: key, isSecret: true }]);
+    notify("APP_KEY baru dibuat. Simpan environment untuk menggunakannya.");
+  };
+  const save = async () => {
+    setSaving(true); setError("");
+    const response = await fetch(`/api/projects/${project.id}/environment`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ environment: entries }) });
+    const result = await response.json();
+    setSaving(false);
+    if (!response.ok) return setError(result.error || "Environment gagal disimpan.");
+    setEntries((items) => items.map((entry) => ({ ...entry, value: entry.isSecret ? "" : entry.value, saved: true })));
+    notify("Environment berhasil disimpan.");
+  };
+  return <section className="panel form-panel"><div className="panel-head"><div><h2>Environment variables</h2><p>Nilai sensitif disamarkan setelah disimpan dan siap untuk worker deployment.</p></div>{canOperate && <div className="environment-actions"><button className="secondary-btn" onClick={() => void generateAppKey()}><KeyRound size={16} />Buat APP_KEY</button><button className="primary-btn" disabled={saving || loading} onClick={() => void save()}><Check size={17} />{saving ? "Menyimpan..." : "Simpan"}</button></div>}</div>{error && <p className="login-error environment-error">{error}</p>}<div className="env-list">{loading ? <p className="user-empty">Memuat environment...</p> : entries.map((entry, index) => <div key={`${entry.key}-${index}`}><input value={entry.key} disabled={!canOperate} onChange={(event) => update(index, { key: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} aria-label="Nama variable" /><input type={entry.isSecret ? "password" : "text"} value={entry.value} disabled={!canOperate} placeholder={entry.isSecret && entry.saved ? "Tersimpan - isi untuk mengganti" : "Nilai"} onChange={(event) => update(index, { value: event.target.value })} aria-label={`Nilai ${entry.key}`} /><button className={`secret-toggle ${entry.isSecret ? "active" : ""}`} disabled={!canOperate} title="Tandai sebagai nilai rahasia" onClick={() => update(index, { isSecret: !entry.isSecret })}><ShieldCheck size={15} /></button><button className="icon-btn subtle" disabled={!canOperate} title="Hapus" onClick={() => setEntries((items) => items.filter((_, entryIndex) => entryIndex !== index))}><X size={16} /></button></div>)}</div>{canOperate && <button className="add-variable" onClick={() => setEntries((items) => [...items, { key: "", value: "", isSecret: false }])}><Plus size={16} />Tambah variable</button>}</section>;
+}
+
+function ResourcesTab({ project, notify, canOperate }: { project: Project; notify: (message: string) => void; canOperate: boolean }) {
+  const [resources, setResources] = useState<ProjectResources>({ phpVersion: "8.3", cpuLimit: 1, memoryLimit: 512, diskQuota: 5, internalPort: 8080 });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { void fetch(`/api/projects/${project.id}/resources`).then((response) => response.json()).then((data) => { if (data.resources) setResources(data.resources); else setError(data.error || "Resource gagal dimuat."); }).catch(() => setError("Resource gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
+  const update = (key: keyof ProjectResources, value: string | number) => setResources((current) => ({ ...current, [key]: value }));
+  const save = async () => { setSaving(true); setError(""); const response = await fetch(`/api/projects/${project.id}/resources`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(resources) }); const result = await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Resource gagal disimpan."); setResources(result.resources); notify("Konfigurasi resource berhasil disimpan."); };
+  return <section className="panel form-panel"><div className="panel-head"><div><h2>Resource container</h2><p>Batas ini akan diterapkan executor Docker saat project dideploy ke VPS.</p></div>{canOperate && <button className="primary-btn" disabled={saving || loading} onClick={() => void save()}><Check size={17} />{saving ? "Menyimpan..." : "Simpan"}</button>}</div>{error && <p className="login-error environment-error">{error}</p>}{loading ? <p className="user-empty">Memuat konfigurasi resource...</p> : <div className="resource-form"><label><span>Versi PHP</span><select disabled={!canOperate} value={resources.phpVersion} onChange={(event) => update("phpVersion", event.target.value)}>{["8.1", "8.2", "8.3", "8.4"].map((version) => <option key={version}>{version}</option>)}</select></label><label><span>CPU limit (vCPU)</span><input disabled={!canOperate} type="number" min="1" max="16" value={resources.cpuLimit} onChange={(event) => update("cpuLimit", Number(event.target.value))} /></label><label><span>Memory limit (MB)</span><input disabled={!canOperate} type="number" min="128" max="32768" step="128" value={resources.memoryLimit} onChange={(event) => update("memoryLimit", Number(event.target.value))} /></label><label><span>Disk quota (GB)</span><input disabled={!canOperate} type="number" min="1" max="1000" value={resources.diskQuota} onChange={(event) => update("diskQuota", Number(event.target.value))} /></label><label><span>Port internal</span><input disabled={!canOperate} type="number" min="1024" max="65535" value={resources.internalPort} onChange={(event) => update("internalPort", Number(event.target.value))} /></label><div className="resource-executor"><Server size={19} /><div><strong>Rencana executor</strong><span>PHP {resources.phpVersion} · {resources.cpuLimit} vCPU · {resources.memoryLimit} MB · {resources.diskQuota} GB · port {resources.internalPort}</span></div></div></div>}</section>;
 }
 
 function DatabaseTab({ project, notify, canOperate }: { project: Project; notify: (m: string) => void; canOperate: boolean }) {
@@ -392,12 +482,19 @@ function ActivityView() {
   ].map(([title, copy, time, kind]) => <div key={title + time}><span className={`timeline-icon ${kind}`}>{kind === "success" ? <Check size={15} /> : kind === "info" ? <CloudUpload size={15} /> : kind === "violet" ? <Archive size={15} /> : <Square size={13} />}</span><div><strong>{title}</strong><p>{copy}</p><small>{time}</small></div></div>)}</div></section>;
 }
 
-function BackupsView({ compact = false, notify }: { compact?: boolean; notify: (m: string) => void }) {
-  return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>{compact ? "Backup project" : "Backup terbaru"}</h2><p>File aplikasi dan database tersimpan bersama.</p></div><button className="primary-btn" onClick={() => notify("Backup baru sedang dibuat")}><Plus size={17} />Buat backup</button></div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Project</span><span>Ukuran</span><span>Dibuat</span><span /></div>{[["automatic-2026-08-12", "NexBill", "186 MB", "Hari ini, 02:00"], ["before-v1.8.2", "NexBill", "181 MB", "4 menit lalu"], ["automatic-2026-08-12", "Toko Merdeka", "244 MB", "Hari ini, 02:04"], ["weekly-2026-w32", "Kasir API", "92 MB", "3 hari lalu"]].map(([name, project, size, date]) => <div className="table-row" key={name + project}><span className="backup-name"><Archive size={17} /><strong>{name}</strong></span><span>{project}</span><span>{size}</span><span>{date}</span><button className="restore-btn" onClick={() => notify(`Pemulihan ${project} disiapkan`)}><RotateCcw size={15} />Pulihkan</button></div>)}</div></section>;
+function BackupsView({ compact = false, project, notify, canOperate = false }: { compact?: boolean; project?: Project; notify: (m: string) => void; canOperate?: boolean }) {
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [loading, setLoading] = useState(Boolean(project));
+  const loadBackups = async () => { if (!project) return; const response = await fetch(`/api/projects/${project.id}/backups`); const result = await response.json(); if (response.ok) setBackups(result.backups ?? []); setLoading(false); };
+  useEffect(() => { void loadBackups(); }, [project?.id]);
+  const createBackup = async () => { if (!project) return notify("Pilih project untuk membuat backup."); const response = await fetch(`/api/projects/${project.id}/backups`, { method: "POST" }); const result = await response.json(); if (!response.ok) return notify(result.error || "Backup gagal diantrikan."); setBackups((items) => [result.backup, ...items]); notify("Backup diantrikan dan menunggu executor VPS."); };
+  const restoreBackup = async (backup: Backup) => { if (!confirm(`Pulihkan ${backup.name}? Tidak ada data yang diubah sebelum executor VPS tersedia.`)) return; const response = await fetch(`/api/backups/${backup.id}/restore`, { method: "POST" }); const result = await response.json(); if (!response.ok) return notify(result.error || "Restore gagal diantrikan."); notify("Restore diantrikan dan menunggu executor VPS."); };
+  if (!project) return <section className="panel backup-page"><div className="panel-head"><div><h2>Backup terbaru</h2><p>Pilih project untuk melihat atau membuat backup.</p></div></div><div className="empty-state"><Archive size={28} /><h3>Backup per project</h3><p>Buka detail project, lalu pilih tab Backup.</p></div></section>;
+  return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>Backup {project.name}</h2><p>Retensi mengikuti pengaturan panel. Executor akan membuat file aplikasi dan database.</p></div>{canOperate && <button className="primary-btn" onClick={() => void createBackup()}><Plus size={17} />Buat backup</button>}</div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Jenis</span><span>Status</span><span>Dibuat</span><span /></div>{loading ? <div className="empty-state"><p>Memuat backup...</p></div> : backups.length ? backups.map((backup) => <div className="table-row" key={backup.id}><span className="backup-name"><Archive size={17} /><strong>{backup.name}</strong></span><span>{backup.type}</span><span className="status status-deploying">Menunggu executor</span><span>{relativeTime(backup.createdAt)}</span>{canOperate ? <button className="restore-btn" onClick={() => void restoreBackup(backup)}><RotateCcw size={15} />Pulihkan</button> : <span />}</div>) : <div className="empty-state"><Archive size={26} /><h3>Belum ada backup</h3><p>Buat backup untuk menyiapkan pemulihan saat executor VPS tersedia.</p></div>}</div></section>;
 }
 
-function SettingsView({ notify, settings, onSave, onChangePassword }: { notify: (m: string) => void; settings: AppSettings; onSave: (s: AppSettings) => Promise<void>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<string | null> }) {
-  const [section, setSection] = useState<"server" | "domain" | "database" | "users" | "account">("server");
+function SettingsView({ notify, settings, onSave, onChangePassword, isAdmin }: { notify: (m: string) => void; settings: AppSettings; onSave: (s: AppSettings) => Promise<void>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<string | null>; isAdmin: boolean }) {
+  const [section, setSection] = useState<"server" | "domain" | "database" | "users" | "account">(isAdmin ? "server" : "account");
   const [draft, setDraft] = useState(settings);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -407,7 +504,7 @@ function SettingsView({ notify, settings, onSave, onChangePassword }: { notify: 
   const update = (key: keyof AppSettings, value: string | number) => setDraft((current) => ({ ...current, [key]: value }));
   const save = () => { void onSave(draft); };
   const submitPassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (newPassword !== confirmation) return setPasswordError("Konfirmasi password belum sama."); setChangingPassword(true); setPasswordError(""); const message = await onChangePassword(currentPassword, newPassword); if (message) setPasswordError(message); else notify("Password berhasil diubah. Silakan masuk kembali."); setChangingPassword(false); };
-  return <div className="settings-grid"><aside className="settings-menu"><button className={section === "server" ? "active" : ""} onClick={() => setSection("server")}><Server size={17} />Server</button><button className={section === "domain" ? "active" : ""} onClick={() => setSection("domain")}><Globe2 size={17} />Domain & SSL</button><button className={section === "database" ? "active" : ""} onClick={() => setSection("database")}><Database size={17} />Database</button><button className={section === "users" ? "active" : ""} onClick={() => setSection("users")}><ShieldCheck size={17} />Pengguna</button><button className={section === "account" ? "active" : ""} onClick={() => setSection("account")}><KeyRound size={17} />Akun</button></aside><section className="panel settings-panel">
+  return <div className="settings-grid"><aside className="settings-menu">{isAdmin && <><button className={section === "server" ? "active" : ""} onClick={() => setSection("server")}><Server size={17} />Server</button><button className={section === "domain" ? "active" : ""} onClick={() => setSection("domain")}><Globe2 size={17} />Domain & SSL</button><button className={section === "database" ? "active" : ""} onClick={() => setSection("database")}><Database size={17} />Database</button><button className={section === "users" ? "active" : ""} onClick={() => setSection("users")}><ShieldCheck size={17} />Pengguna</button></>}<button className={section === "account" ? "active" : ""} onClick={() => setSection("account")}><KeyRound size={17} />Akun</button></aside><section className="panel settings-panel">
     <div className="panel-head"><div><h2>{section === "server" ? "Konfigurasi server" : section === "domain" ? "Domain & SSL" : section === "database" ? "Default database" : section === "users" ? "Pengguna & akses" : "Keamanan akun"}</h2><p>{section === "server" ? "Informasi VPS yang digunakan oleh NEXDEPLOY." : section === "domain" ? "Domain ini dipakai otomatis oleh setiap project baru." : section === "database" ? "Tentukan database awal dan kebijakan backup." : section === "users" ? "Buat akun dan atur akses anggota tim." : "Perbarui password untuk menjaga akses panel tetap aman."}</p></div></div>
     {section === "server" && <div className="settings-form"><label><span>Nama server</span><input value={draft.serverName} onChange={(e) => update("serverName", e.target.value)} /></label><label><span>Alamat IP</span><input value={draft.serverIp} onChange={(e) => update("serverIp", e.target.value)} /></label><label><span>Lokasi</span><select value={draft.location} onChange={(e) => update("location", e.target.value)}><option>Jakarta</option><option>Singapore</option></select></label><label><span>Direktori project</span><input value={draft.projectDirectory} onChange={(e) => update("projectDirectory", e.target.value)} /></label></div>}
     {section === "domain" && <div className="settings-form"><label><span>Base domain</span><input value={draft.baseDomain} onChange={(e) => update("baseDomain", e.target.value.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, ""))} placeholder="apps.domain.com" /></label><label><span>URL Nginx Proxy Manager</span><input value={draft.npmUrl} onChange={(e) => update("npmUrl", e.target.value)} /></label><label><span>Email SSL</span><input type="email" value={draft.sslEmail} onChange={(e) => update("sslEmail", e.target.value)} /></label><div className="domain-preview"><Globe2 size={18} /><div><span>Contoh alamat project</span><strong>nama-project.{draft.baseDomain}</strong></div></div></div>}
@@ -473,7 +570,7 @@ function CreateProjectModal({ onClose, onSubmit, baseDomain, defaultDatabase }: 
   const next = () => { if (draft.name.trim()) setStep(2); };
   const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!draft.fileName) return; onSubmit(draft); };
   return <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-backdrop" onClick={onClose} aria-label="Tutup dialog" /><div className="modal"><div className="modal-head"><div><span>LANGKAH {step} DARI 2</span><h2 id="modal-title">{step === 1 ? "Buat project baru" : "Unggah aplikasi"}</h2><p>{step === 1 ? "Kami siapkan domain dan database secara otomatis." : `Project ${draft.name} siap menerima file aplikasi.`}</p></div><button className="icon-btn" onClick={onClose}><X size={20} /></button></div><div className="step-line"><i className="done" /><i className={step === 2 ? "done" : ""} /></div><form onSubmit={submit}>
-    {step === 1 ? <div className="modal-fields"><label><span>Nama project</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Contoh: makanan-mama" autoFocus /></label><label><span>Framework</span><select value={draft.framework} onChange={(e) => setDraft({ ...draft, framework: e.target.value })}><option>Laravel</option><option>PHP Native</option></select></label><label><span>Database</span><select value={draft.database} onChange={(e) => setDraft({ ...draft, database: e.target.value as DatabaseType })}><option>MariaDB</option><option>PostgreSQL</option><option>Tanpa database</option></select></label><div className="domain-preview"><Globe2 size={18} /><div><span>Domain otomatis</span><strong>{slug}.{baseDomain}</strong></div></div></div> : <label className={`upload-zone ${draft.fileName ? "has-file" : ""}`}><CloudUpload size={28} /><h3>{draft.fileName || "Pilih file ZIP aplikasi"}</h3><p>{draft.fileName ? "File siap digunakan" : "Klik area ini untuk memilih file dari perangkat"}</p><span className="secondary-btn">{draft.fileName ? "Ganti file" : "Pilih file ZIP"}</span><input type="file" accept=".zip,application/zip" onChange={(e) => setDraft({ ...draft, fileName: e.target.files?.[0]?.name || "" })} /><small>Maksimal 500 MB · format .zip</small></label>}
+    {step === 1 ? <div className="modal-fields"><label><span>Nama project</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Contoh: makanan-mama" autoFocus /></label><label><span>Framework</span><select value={draft.framework} onChange={(e) => setDraft({ ...draft, framework: e.target.value })}><option>Laravel</option><option>PHP Native</option></select></label><label><span>Database</span><select value={draft.database} onChange={(e) => setDraft({ ...draft, database: e.target.value as DatabaseType })}><option>MariaDB</option><option>PostgreSQL</option><option>Tanpa database</option></select></label><div className="domain-preview"><Globe2 size={18} /><div><span>Domain otomatis</span><strong>{slug}.{baseDomain}</strong></div></div></div> : <label className={`upload-zone ${draft.fileName ? "has-file" : ""}`}><CloudUpload size={28} /><h3>{draft.fileName || "Pilih file ZIP aplikasi"}</h3><p>{draft.fileName ? "File siap digunakan dan akan diperiksa sebelum diproses." : "Klik area ini untuk memilih file dari perangkat"}</p><span className="secondary-btn">{draft.fileName ? "Ganti file" : "Pilih file ZIP"}</span><input id="project-archive" type="file" accept=".zip,application/zip" onChange={(e) => { const file = e.target.files?.[0]; setDraft({ ...draft, fileName: file?.name || "", file }); }} /><small>Maksimal 100 MB di panel lokal · format .zip</small></label>}
     <footer className="modal-footer">{step === 2 && <button type="button" className="text-btn" onClick={() => setStep(1)}><ChevronLeft size={16} />Kembali</button>}<span /><button type={step === 1 ? "button" : "submit"} disabled={step === 1 ? !draft.name.trim() : !draft.fileName} className="primary-btn" onClick={step === 1 ? next : undefined}>{step === 1 ? "Lanjutkan" : "Mulai deploy"}{step === 1 && <ChevronLeft size={16} className="rotate" />}</button></footer>
   </form></div></div>;
 }

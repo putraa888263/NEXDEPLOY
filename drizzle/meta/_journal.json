@@ -22,6 +22,41 @@
       "when": 1786590916824,
       "tag": "0002_overconfident_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786593384792,
+      "tag": "0003_lonely_zemo",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786594725432,
+      "tag": "0004_quiet_ted_forrester",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786597188049,
+      "tag": "0005_whole_rockslide",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786597448486,
+      "tag": "0006_solid_marvel_zombies",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786598791073,
+      "tag": "0007_sparkling_captain_britain",
+      "breakpoints": true
     }
   ]
 }
