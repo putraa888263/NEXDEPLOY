@@ -1,6 +1,15 @@
-import { access } from "node:fs/promises";
-import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import {
+  access,
+  readdir,
+} from "node:fs/promises";
+
+import {
+  join,
+} from "node:path";
+
+import {
+  randomBytes,
+} from "node:crypto";
 
 export const LARAVEL_PHP_VERSION = "8.3";
 
@@ -11,11 +20,22 @@ export const CONTAINER_PORT = 8080;
 
 export function isLaravelRelease(releasePath) {
   return Promise.all([
-    access(join(releasePath, "artisan")).then(
+    access(
+      join(
+        releasePath,
+        "artisan",
+      ),
+    ).then(
       () => true,
       () => false,
     ),
-    access(join(releasePath, "composer.json")).then(
+
+    access(
+      join(
+        releasePath,
+        "composer.json",
+      ),
+    ).then(
       () => true,
       () => false,
     ),
@@ -25,18 +45,100 @@ export function isLaravelRelease(releasePath) {
   );
 }
 
-export function shouldRunComposer(releasePath) {
+export async function resolveLaravelReleaseRoot(
+  releasePath,
+) {
+  // Struktur ZIP flat:
+  //
+  // release/
+  // ├── artisan
+  // └── composer.json
+  if (
+    await isLaravelRelease(
+      releasePath,
+    )
+  ) {
+    return releasePath;
+  }
+
+  let entries;
+
+  try {
+    entries =
+      await readdir(
+        releasePath,
+        {
+          withFileTypes: true,
+        },
+      );
+  } catch {
+    return null;
+  }
+
+  const candidates = [];
+
+  // Struktur ZIP wrapped:
+  //
+  // release/
+  // └── NEXA-AI-Control-Center/
+  //     ├── artisan
+  //     └── composer.json
+  //
+  // Kita hanya scan satu level agar executor tidak mencari
+  // Laravel root secara liar jauh ke dalam archive.
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const candidate =
+      join(
+        releasePath,
+        entry.name,
+      );
+
+    if (
+      await isLaravelRelease(
+        candidate,
+      )
+    ) {
+      candidates.push(
+        candidate,
+      );
+    }
+  }
+
+  // Hanya terima jika tepat satu Laravel root ditemukan.
+  // Kalau lebih dari satu, executor tidak boleh menebak.
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  return null;
+}
+
+export function shouldRunComposer(
+  releasePath,
+) {
   return access(
-    join(releasePath, "composer.json"),
+    join(
+      releasePath,
+      "composer.json",
+    ),
   ).then(
     () => true,
     () => false,
   );
 }
 
-export function shouldRunFrontendBuild(releasePath) {
+export function shouldRunFrontendBuild(
+  releasePath,
+) {
   return access(
-    join(releasePath, "package.json"),
+    join(
+      releasePath,
+      "package.json",
+    ),
   ).then(
     () => true,
     () => false,
@@ -72,6 +174,7 @@ export function buildRuntimeEnvironment() {
     APP_ENV: "production",
     APP_DEBUG: "false",
     APP_KEY: appKey(),
+
     LOG_CHANNEL: "stderr",
 
     // Phase 1 belum provisioning database.
@@ -104,38 +207,49 @@ export function mergeEnvFile(
     new Set();
 
   const merged =
-    lines.map((line) => {
-      const match =
-        line.match(
-          /^([A-Z0-9_]+)=(.*)$/,
-        );
+    lines.map(
+      (line) => {
+        const match =
+          line.match(
+            /^([A-Z0-9_]+)=(.*)$/,
+          );
 
-      if (!match) {
-        return line;
-      }
+        if (!match) {
+          return line;
+        }
 
-      const [, key, value] =
-        match;
+        const [
+          ,
+          key,
+          value,
+        ] = match;
 
-      if (!(key in overrides)) {
-        return line;
-      }
+        if (
+          !(key in overrides)
+        ) {
+          return line;
+        }
 
-      seen.add(key);
+        seen.add(key);
 
-      if (
-        key === "APP_KEY" &&
-        value.trim().length > 0
-      ) {
-        return line;
-      }
+        // Jangan overwrite APP_KEY existing
+        // jika memang sudah berisi nilai.
+        if (
+          key === "APP_KEY" &&
+          value.trim().length > 0
+        ) {
+          return line;
+        }
 
-      return `${key}=${overrides[key]}`;
-    });
+        return `${key}=${overrides[key]}`;
+      },
+    );
 
   for (
     const [key, value]
-      of Object.entries(overrides)
+      of Object.entries(
+        overrides,
+      )
   ) {
     if (!seen.has(key)) {
       merged.push(
@@ -147,7 +261,11 @@ export function mergeEnvFile(
   return (
     merged
       .filter(
-        (line, index, all) =>
+        (
+          line,
+          index,
+          all,
+        ) =>
           !(
             line === "" &&
             all[index - 1] === ""
@@ -160,7 +278,9 @@ export function mergeEnvFile(
 
 function stripAnsi(value) {
   const escape =
-    String.fromCharCode(27);
+    String.fromCharCode(
+      27,
+    );
 
   const pattern =
     new RegExp(
@@ -168,11 +288,17 @@ function stripAnsi(value) {
       "g",
     );
 
-  return String(value ?? "")
-    .replace(pattern, "");
+  return String(
+    value ?? "",
+  ).replace(
+    pattern,
+    "",
+  );
 }
 
-export function summarizeFailure(stderr) {
+export function summarizeFailure(
+  stderr,
+) {
   if (!stderr) {
     return "Perintah Laravel gagal tanpa pesan.";
   }
@@ -182,7 +308,8 @@ export function summarizeFailure(stderr) {
       .split(/\r?\n/)
       .filter(
         (line) =>
-          line.trim().length > 0,
+          line.trim().length >
+          0,
       );
 
   return lines

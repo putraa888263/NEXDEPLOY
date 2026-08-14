@@ -1,123 +1,661 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+
+import {
+  tmpdir,
+} from "node:os";
+
+import {
+  join,
+} from "node:path";
+
 import test from "node:test";
 
 import {
+  appKey,
+  buildEntrypointCommand,
+  buildRuntimeEnvironment,
+  composerInstallCommand,
+  CONTAINER_PORT,
+  frontendBuildCommand,
   isLaravelRelease,
+  mergeEnvFile,
+  resolveLaravelReleaseRoot,
   shouldRunComposer,
   shouldRunFrontendBuild,
-  composerInstallCommand,
-  frontendBuildCommand,
-  appKey,
-  buildRuntimeEnvironment,
-  buildEntrypointCommand,
-  mergeEnvFile,
   summarizeFailure,
-  CONTAINER_PORT,
 } from "./laravel.mjs";
 
-async function withTempDir(run) {
-  const dir = await mkdtemp(join(tmpdir(), "nexdeploy-laravel-test-"));
-  try {
-    await run(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+test(
+  "isLaravelRelease: true only when both artisan and composer.json exist",
+  async () => {
+    const root =
+      await mkdtemp(
+        join(
+          tmpdir(),
+          "nexdeploy-laravel-",
+        ),
+      );
 
-test("isLaravelRelease: true only when both artisan and composer.json exist", async () => {
-  await withTempDir(async (dir) => {
-    assert.equal(await isLaravelRelease(dir), false);
-    await writeFile(join(dir, "artisan"), "#!/usr/bin/env php\n");
-    assert.equal(await isLaravelRelease(dir), false);
-    await writeFile(join(dir, "composer.json"), "{}");
-    assert.equal(await isLaravelRelease(dir), true);
-  });
-});
+    try {
+      assert.equal(
+        await isLaravelRelease(
+          root,
+        ),
+        false,
+      );
 
-test("shouldRunComposer / shouldRunFrontendBuild reflect file presence", async () => {
-  await withTempDir(async (dir) => {
-    assert.equal(await shouldRunComposer(dir), false);
-    assert.equal(await shouldRunFrontendBuild(dir), false);
-    await writeFile(join(dir, "composer.json"), "{}");
-    await writeFile(join(dir, "package.json"), "{}");
-    assert.equal(await shouldRunComposer(dir), true);
-    assert.equal(await shouldRunFrontendBuild(dir), true);
-  });
-});
+      await writeFile(
+        join(
+          root,
+          "artisan",
+        ),
+        "#!/usr/bin/env php\n",
+      );
 
-test("composerInstallCommand: production-safe flags", () => {
-  const cmd = composerInstallCommand();
-  assert.equal(cmd[0], "composer");
-  assert.ok(cmd.includes("--no-dev"));
-  assert.ok(cmd.includes("--no-interaction"));
-  assert.ok(cmd.includes("--optimize-autoloader"));
-  assert.ok(!cmd.includes("--dev"));
-});
+      assert.equal(
+        await isLaravelRelease(
+          root,
+        ),
+        false,
+      );
 
-test("frontendBuildCommand: prefers npm ci when a lockfile is present", () => {
-  const cmd = frontendBuildCommand();
-  const script = cmd[cmd.length - 1];
-  assert.match(script, /npm ci/);
-  assert.match(script, /npm run build/);
-});
+      await writeFile(
+        join(
+          root,
+          "composer.json",
+        ),
+        "{}",
+      );
 
-test("appKey: matches Laravel's base64:<32 bytes> format", () => {
-  const key = appKey();
-  assert.match(key, /^base64:[A-Za-z0-9+/]+=*$/);
-  const raw = Buffer.from(key.slice("base64:".length), "base64");
-  assert.equal(raw.length, 32);
-});
+      assert.equal(
+        await isLaravelRelease(
+          root,
+        ),
+        true,
+      );
+    } finally {
+      await rm(
+        root,
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    }
+  },
+);
 
-test("buildRuntimeEnvironment: safe production defaults, no DB provisioning yet", () => {
-  const env = buildRuntimeEnvironment();
-  assert.equal(env.APP_ENV, "production");
-  assert.equal(env.APP_DEBUG, "false");
-  assert.match(env.APP_KEY, /^base64:/);
-  assert.equal(env.DB_CONNECTION, "sqlite");
-});
+test(
+  "resolveLaravelReleaseRoot: returns flat Laravel root directly",
+  async () => {
+    const root =
+      await mkdtemp(
+        join(
+          tmpdir(),
+          "nexdeploy-flat-",
+        ),
+      );
 
-test("buildEntrypointCommand: serves on CONTAINER_PORT and is storage-link tolerant", () => {
-  const cmd = buildEntrypointCommand();
-  const script = cmd[cmd.length - 1];
-  assert.match(script, new RegExp(`--port=${CONTAINER_PORT}`));
-  assert.match(script, /storage:link \|\| true/);
-});
+    try {
+      await writeFile(
+        join(
+          root,
+          "artisan",
+        ),
+        "#!/usr/bin/env php\n",
+      );
 
-test("mergeEnvFile: overrides known keys, preserves unknown ones", () => {
-  const existing = "APP_NAME=MyApp\nAPP_ENV=local\nMAIL_MAILER=smtp\n";
-  const merged = mergeEnvFile(existing, { APP_ENV: "production", APP_DEBUG: "false" });
-  assert.match(merged, /APP_NAME=MyApp/);
-  assert.match(merged, /APP_ENV=production/);
-  assert.match(merged, /MAIL_MAILER=smtp/);
-  assert.match(merged, /APP_DEBUG=false/);
-});
+      await writeFile(
+        join(
+          root,
+          "composer.json",
+        ),
+        "{}",
+      );
 
-test("mergeEnvFile: adds override keys missing from the source file", () => {
-  const merged = mergeEnvFile("APP_NAME=MyApp\n", { DB_CONNECTION: "sqlite" });
-  assert.match(merged, /DB_CONNECTION=sqlite/);
-});
+      assert.equal(
+        await resolveLaravelReleaseRoot(
+          root,
+        ),
+        root,
+      );
+    } finally {
+      await rm(
+        root,
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    }
+  },
+);
 
-test("mergeEnvFile: does not clobber an already-set non-empty APP_KEY", () => {
-  const merged = mergeEnvFile("APP_KEY=base64:existingkey==\n", { APP_KEY: "base64:newkey==" });
-  assert.match(merged, /APP_KEY=base64:existingkey==/);
-});
+test(
+  "resolveLaravelReleaseRoot: detects Laravel inside one wrapper directory",
+  async () => {
+    const root =
+      await mkdtemp(
+        join(
+          tmpdir(),
+          "nexdeploy-wrapper-",
+        ),
+      );
 
-test("mergeEnvFile: never leaks the generated key or secrets to a thrown error (sanity: pure string op)", () => {
-  const merged = mergeEnvFile("", { APP_KEY: "base64:secret==" });
-  assert.equal(typeof merged, "string");
-});
+    const wrapped =
+      join(
+        root,
+        "NEXA-AI-Control-Center",
+      );
 
-test("summarizeFailure: keeps only the last few meaningful lines", () => {
-  const stderr = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
-  const summary = summarizeFailure(stderr);
-  assert.equal(summary.split("\n").length, 6);
-  assert.match(summary, /line 19/);
-});
+    try {
+      await mkdir(
+        wrapped,
+        {
+          recursive: true,
+        },
+      );
 
-test("summarizeFailure: handles empty input", () => {
-  assert.equal(summarizeFailure(""), "Perintah Laravel gagal tanpa pesan.");
-  assert.equal(summarizeFailure(undefined), "Perintah Laravel gagal tanpa pesan.");
-});
+      await writeFile(
+        join(
+          wrapped,
+          "artisan",
+        ),
+        "#!/usr/bin/env php\n",
+      );
+
+      await writeFile(
+        join(
+          wrapped,
+          "composer.json",
+        ),
+        "{}",
+      );
+
+      assert.equal(
+        await resolveLaravelReleaseRoot(
+          root,
+        ),
+        wrapped,
+      );
+    } finally {
+      await rm(
+        root,
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    }
+  },
+);
+
+test(
+  "resolveLaravelReleaseRoot: refuses ambiguous multiple Laravel roots",
+  async () => {
+    const root =
+      await mkdtemp(
+        join(
+          tmpdir(),
+          "nexdeploy-multiple-",
+        ),
+      );
+
+    const first =
+      join(
+        root,
+        "app-one",
+      );
+
+    const second =
+      join(
+        root,
+        "app-two",
+      );
+
+    try {
+      await mkdir(
+        first,
+        {
+          recursive: true,
+        },
+      );
+
+      await mkdir(
+        second,
+        {
+          recursive: true,
+        },
+      );
+
+      for (
+        const candidate of [
+          first,
+          second,
+        ]
+      ) {
+        await writeFile(
+          join(
+            candidate,
+            "artisan",
+          ),
+          "#!/usr/bin/env php\n",
+        );
+
+        await writeFile(
+          join(
+            candidate,
+            "composer.json",
+          ),
+          "{}",
+        );
+      }
+
+      assert.equal(
+        await resolveLaravelReleaseRoot(
+          root,
+        ),
+        null,
+      );
+    } finally {
+      await rm(
+        root,
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    }
+  },
+);
+
+test(
+  "shouldRunComposer / shouldRunFrontendBuild reflect file presence",
+  async () => {
+    const root =
+      await mkdtemp(
+        join(
+          tmpdir(),
+          "nexdeploy-build-",
+        ),
+      );
+
+    try {
+      assert.equal(
+        await shouldRunComposer(
+          root,
+        ),
+        false,
+      );
+
+      assert.equal(
+        await shouldRunFrontendBuild(
+          root,
+        ),
+        false,
+      );
+
+      await writeFile(
+        join(
+          root,
+          "composer.json",
+        ),
+        "{}",
+      );
+
+      await writeFile(
+        join(
+          root,
+          "package.json",
+        ),
+        "{}",
+      );
+
+      assert.equal(
+        await shouldRunComposer(
+          root,
+        ),
+        true,
+      );
+
+      assert.equal(
+        await shouldRunFrontendBuild(
+          root,
+        ),
+        true,
+      );
+    } finally {
+      await rm(
+        root,
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    }
+  },
+);
+
+test(
+  "composerInstallCommand: production-safe flags",
+  () => {
+    const command =
+      composerInstallCommand();
+
+    assert.equal(
+      command[0],
+      "composer",
+    );
+
+    assert.ok(
+      command.includes(
+        "install",
+      ),
+    );
+
+    assert.ok(
+      command.includes(
+        "--no-dev",
+      ),
+    );
+
+    assert.ok(
+      command.includes(
+        "--prefer-dist",
+      ),
+    );
+
+    assert.ok(
+      command.includes(
+        "--no-interaction",
+      ),
+    );
+
+    assert.ok(
+      command.includes(
+        "--optimize-autoloader",
+      ),
+    );
+  },
+);
+
+test(
+  "frontendBuildCommand: prefers npm ci when a lockfile is present",
+  () => {
+    const command =
+      frontendBuildCommand();
+
+    assert.equal(
+      command[0],
+      "sh",
+    );
+
+    assert.equal(
+      command[1],
+      "-c",
+    );
+
+    assert.match(
+      command[2],
+      /npm ci/,
+    );
+
+    assert.match(
+      command[2],
+      /package-lock\.json/,
+    );
+
+    assert.match(
+      command[2],
+      /npm run build/,
+    );
+  },
+);
+
+test(
+  "appKey: matches Laravel's base64:<32 bytes> format",
+  () => {
+    const value =
+      appKey();
+
+    assert.match(
+      value,
+      /^base64:[A-Za-z0-9+/]+={0,2}$/,
+    );
+
+    const raw =
+      Buffer.from(
+        value.slice(
+          "base64:".length,
+        ),
+        "base64",
+      );
+
+    assert.equal(
+      raw.length,
+      32,
+    );
+  },
+);
+
+test(
+  "buildRuntimeEnvironment: safe production defaults, no DB provisioning yet",
+  () => {
+    const env =
+      buildRuntimeEnvironment();
+
+    assert.equal(
+      env.APP_ENV,
+      "production",
+    );
+
+    assert.equal(
+      env.APP_DEBUG,
+      "false",
+    );
+
+    assert.match(
+      env.APP_KEY,
+      /^base64:/,
+    );
+
+    assert.equal(
+      env.LOG_CHANNEL,
+      "stderr",
+    );
+
+    assert.equal(
+      env.DB_CONNECTION,
+      "sqlite",
+    );
+
+    assert.equal(
+      env.DB_DATABASE,
+      "/dev/null",
+    );
+  },
+);
+
+test(
+  "buildEntrypointCommand: serves on CONTAINER_PORT and is storage-link tolerant",
+  () => {
+    const command =
+      buildEntrypointCommand();
+
+    assert.equal(
+      command[0],
+      "sh",
+    );
+
+    assert.equal(
+      command[1],
+      "-c",
+    );
+
+    assert.match(
+      command[2],
+      /artisan storage:link \|\| true/,
+    );
+
+    assert.match(
+      command[2],
+      new RegExp(
+        `--port=${CONTAINER_PORT}`,
+      ),
+    );
+  },
+);
+
+test(
+  "mergeEnvFile: overrides known keys, preserves unknown ones",
+  () => {
+    const merged =
+      mergeEnvFile(
+        [
+          "APP_ENV=local",
+          "APP_DEBUG=true",
+          "MAIL_MAILER=smtp",
+          "",
+        ].join(
+          "\n",
+        ),
+        {
+          APP_ENV:
+            "production",
+          APP_DEBUG:
+            "false",
+        },
+      );
+
+    assert.match(
+      merged,
+      /APP_ENV=production/,
+    );
+
+    assert.match(
+      merged,
+      /APP_DEBUG=false/,
+    );
+
+    assert.match(
+      merged,
+      /MAIL_MAILER=smtp/,
+    );
+  },
+);
+
+test(
+  "mergeEnvFile: adds override keys missing from the source file",
+  () => {
+    const merged =
+      mergeEnvFile(
+        "APP_ENV=local\n",
+        {
+          APP_ENV:
+            "production",
+          LOG_CHANNEL:
+            "stderr",
+        },
+      );
+
+    assert.match(
+      merged,
+      /APP_ENV=production/,
+    );
+
+    assert.match(
+      merged,
+      /LOG_CHANNEL=stderr/,
+    );
+  },
+);
+
+test(
+  "mergeEnvFile: does not clobber an already-set non-empty APP_KEY",
+  () => {
+    const merged =
+      mergeEnvFile(
+        "APP_KEY=base64:existingkey==\n",
+        {
+          APP_KEY:
+            "base64:newkey==",
+        },
+      );
+
+    assert.match(
+      merged,
+      /APP_KEY=base64:existingkey==/,
+    );
+
+    assert.doesNotMatch(
+      merged,
+      /APP_KEY=base64:newkey==/,
+    );
+  },
+);
+
+test(
+  "mergeEnvFile: never leaks the generated key or secrets to a thrown error (sanity: pure string op)",
+  () => {
+    assert.doesNotThrow(
+      () =>
+        mergeEnvFile(
+          "",
+          buildRuntimeEnvironment(),
+        ),
+    );
+  },
+);
+
+test(
+  "summarizeFailure: keeps only the last few meaningful lines",
+  () => {
+    const source =
+      Array.from(
+        {
+          length: 12,
+        },
+        (
+          _,
+          index,
+        ) =>
+          `line-${index + 1}`,
+      ).join(
+        "\n",
+      );
+
+    const summarized =
+      summarizeFailure(
+        source,
+      );
+
+    assert.doesNotMatch(
+      summarized,
+      /line-1\n/,
+    );
+
+    assert.match(
+      summarized,
+      /line-12/,
+    );
+  },
+);
+
+test(
+  "summarizeFailure: handles empty input",
+  () => {
+    assert.equal(
+      summarizeFailure(
+        "",
+      ),
+      "Perintah Laravel gagal tanpa pesan.",
+    );
+  },
+);

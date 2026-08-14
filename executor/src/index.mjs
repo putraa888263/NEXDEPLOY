@@ -57,7 +57,7 @@ import {
 } from "./deployment/docker.mjs";
 
 import {
-  isLaravelRelease,
+  resolveLaravelReleaseRoot,
   shouldRunComposer,
   shouldRunFrontendBuild,
   composerInstallCommand,
@@ -69,43 +69,63 @@ import {
   CONTAINER_PORT,
 } from "./deployment/laravel.mjs";
 
-const executorDir = dirname(
-  fileURLToPath(import.meta.url),
-);
+const executorDir =
+  dirname(
+    fileURLToPath(
+      import.meta.url,
+    ),
+  );
 
-const laravelDockerfile = resolve(
-  executorDir,
-  "..",
-  "tpl",
-  "laravel.Dockerfile",
-);
+const laravelDockerfile =
+  resolve(
+    executorDir,
+    "..",
+    "tpl",
+    "laravel.Dockerfile",
+  );
 
 class DeployStageError extends Error {
-  constructor(stage, message) {
+  constructor(
+    stage,
+    message,
+  ) {
     super(message);
-    this.stage = stage;
+
+    this.stage =
+      stage;
   }
 }
 
 async function loadLocalEnvironment() {
   try {
-    const source = await readFile(
-      new URL("../.env", import.meta.url),
-      "utf8",
-    );
+    const source =
+      await readFile(
+        new URL(
+          "../.env",
+          import.meta.url,
+        ),
+        "utf8",
+      );
 
     for (
-      const line of source.split(/\r?\n/)
+      const line of source.split(
+        /\r?\n/,
+      )
     ) {
-      const match = line.match(
-        /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/,
-      );
+      const match =
+        line.match(
+          /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/,
+        );
 
       if (
         match &&
-        process.env[match[1]] === undefined
+        process.env[
+          match[1]
+        ] === undefined
       ) {
-        process.env[match[1]] =
+        process.env[
+          match[1]
+        ] =
           match[2].replace(
             /^['"]|['"]$/g,
             "",
@@ -113,7 +133,10 @@ async function loadLocalEnvironment() {
       }
     }
   } catch (error) {
-    if (error?.code !== "ENOENT") {
+    if (
+      error?.code !==
+      "ENOENT"
+    ) {
       throw error;
     }
   }
@@ -121,28 +144,34 @@ async function loadLocalEnvironment() {
 
 await loadLocalEnvironment();
 
-const port = Number(
-  process.env.PORT || 8787,
-);
+const port =
+  Number(
+    process.env.PORT ||
+      8787,
+  );
 
 const host =
-  process.env.HOST || "127.0.0.1";
+  process.env.HOST ||
+  "127.0.0.1";
 
 const token =
   process.env.EXECUTOR_TOKEN;
 
-const projectsDir = resolve(
-  process.env.PROJECTS_DIR ||
-    "./executor-work",
-);
+const projectsDir =
+  resolve(
+    process.env.PROJECTS_DIR ||
+      "./executor-work",
+  );
 
-const stateDir = join(
-  projectsDir,
-  ".nexdeploy",
-  "jobs",
-);
+const stateDir =
+  join(
+    projectsDir,
+    ".nexdeploy",
+    "jobs",
+  );
 
-const jobs = new Map();
+const jobs =
+  new Map();
 
 if (!token) {
   throw new Error(
@@ -153,18 +182,26 @@ if (!token) {
 function json(
   response,
   status,
-  body,
+  responseBody,
 ) {
-  response.writeHead(status, {
-    "content-type": "application/json",
-  });
+  response.writeHead(
+    status,
+    {
+      "content-type":
+        "application/json",
+    },
+  );
 
   response.end(
-    JSON.stringify(body),
+    JSON.stringify(
+      responseBody,
+    ),
   );
 }
 
-async function body(request) {
+async function body(
+  request,
+) {
   let raw = "";
 
   for await (
@@ -178,9 +215,12 @@ async function body(request) {
     : {};
 }
 
-function authorized(request) {
+function authorized(
+  request,
+) {
   return (
-    request.headers.authorization ===
+    request.headers
+      .authorization ===
     `Bearer ${token}`
   );
 }
@@ -201,7 +241,9 @@ async function save(job) {
   );
 
   await writeFile(
-    jobFile(job.id),
+    jobFile(
+      job.id,
+    ),
     JSON.stringify(
       job,
       null,
@@ -211,17 +253,22 @@ async function save(job) {
 }
 
 async function load(id) {
-  if (jobs.has(id)) {
-    return jobs.get(id);
+  if (
+    jobs.has(id)
+  ) {
+    return jobs.get(
+      id,
+    );
   }
 
   try {
-    const job = JSON.parse(
-      await readFile(
-        jobFile(id),
-        "utf8",
-      ),
-    );
+    const job =
+      JSON.parse(
+        await readFile(
+          jobFile(id),
+          "utf8",
+        ),
+      );
 
     jobs.set(
       id,
@@ -240,7 +287,8 @@ async function log(
   message,
 ) {
   job.logs.push({
-    at: new Date().toISOString(),
+    at:
+      new Date().toISOString(),
     level,
     message,
   });
@@ -257,13 +305,15 @@ function command(
       resolveCommand,
       reject,
     ) => {
-      const child = spawn(
-        commandName,
-        args,
-        {
-          windowsHide: true,
-        },
-      );
+      const child =
+        spawn(
+          commandName,
+          args,
+          {
+            windowsHide:
+              true,
+          },
+        );
 
       let output = "";
 
@@ -289,10 +339,13 @@ function command(
       child.on(
         "close",
         (code) => {
-          if (code === 0) {
+          if (
+            code === 0
+          ) {
             resolveCommand(
               output,
             );
+
             return;
           }
 
@@ -357,14 +410,18 @@ async function extractArchive(
   }
 }
 
-function safeArchiveList(list) {
-  const entries = list
-    .split(/\r?\n/)
-    .filter(Boolean);
+function safeArchiveList(
+  list,
+) {
+  const entries =
+    list
+      .split(/\r?\n/)
+      .filter(Boolean);
 
   if (
     !entries.length ||
-    entries.length > 50000
+    entries.length >
+      50000
   ) {
     throw new Error(
       "ZIP kosong atau memuat terlalu banyak file.",
@@ -374,10 +431,16 @@ function safeArchiveList(list) {
   if (
     entries.some(
       (entry) =>
-        entry.startsWith("/") ||
+        entry.startsWith(
+          "/",
+        ) ||
         entry
-          .split(/[\\/]/)
-          .includes(".."),
+          .split(
+            /[\\/]/,
+          )
+          .includes(
+            "..",
+          ),
     )
   ) {
     throw new Error(
@@ -388,8 +451,11 @@ function safeArchiveList(list) {
   return entries;
 }
 
-async function processArchive(job) {
-  job.status = "extracting";
+async function processArchive(
+  job,
+) {
+  job.status =
+    "extracting";
 
   await log(
     job,
@@ -397,14 +463,16 @@ async function processArchive(job) {
     "Arsip diterima executor dan disimpan secara persisten.",
   );
 
-  const archivePath = join(
-    projectsDir,
-    ".nexdeploy",
-    "archives",
-    `${job.id}-${basename(
-      job.payload.archiveName,
-    )}`,
-  );
+  const archivePath =
+    join(
+      projectsDir,
+      ".nexdeploy",
+      "archives",
+      `${job.id}-${basename(
+        job.payload
+          .archiveName,
+      )}`,
+    );
 
   const entries =
     safeArchiveList(
@@ -419,19 +487,22 @@ async function processArchive(job) {
     `Validasi aman selesai: ${entries.length} file ditemukan.`,
   );
 
-  const releaseRoot = join(
-    projectsDir,
-    job.payload.projectId,
-    "releases",
-  );
+  const releaseRoot =
+    join(
+      projectsDir,
+      job.payload
+        .projectId,
+      "releases",
+    );
 
-  const release = join(
-    releaseRoot,
-    job.id,
-  );
+  const extractedRelease =
+    join(
+      releaseRoot,
+      job.id,
+    );
 
   await rm(
-    release,
+    extractedRelease,
     {
       recursive: true,
       force: true,
@@ -439,7 +510,7 @@ async function processArchive(job) {
   );
 
   await mkdir(
-    release,
+    extractedRelease,
     {
       recursive: true,
     },
@@ -447,10 +518,8 @@ async function processArchive(job) {
 
   await extractArchive(
     archivePath,
-    release,
+    extractedRelease,
   );
-
-  job.releasePath = release;
 
   await log(
     job,
@@ -458,16 +527,20 @@ async function processArchive(job) {
     "ZIP berhasil diekstrak ke release baru.",
   );
 
-  if (
-    !(await isLaravelRelease(
-      release,
-    ))
-  ) {
+  const laravelRoot =
+    await resolveLaravelReleaseRoot(
+      extractedRelease,
+    );
+
+  if (!laravelRoot) {
     await log(
       job,
       "warning",
-      "Release siap, tetapi bukan proyek Laravel (artisan/composer.json tidak ditemukan).",
+      "Release siap, tetapi root Laravel tidak ditemukan atau ambigu (artisan/composer.json).",
     );
+
+    job.releasePath =
+      extractedRelease;
 
     job.status =
       "waiting_vps";
@@ -480,6 +553,24 @@ async function processArchive(job) {
     return;
   }
 
+  job.releasePath =
+    laravelRoot;
+
+  await save(job);
+
+  if (
+    laravelRoot !==
+    extractedRelease
+  ) {
+    await log(
+      job,
+      "info",
+      `Root Laravel ditemukan di folder pembungkus: ${basename(
+        laravelRoot,
+      )}.`,
+    );
+  }
+
   await log(
     job,
     "info",
@@ -489,7 +580,7 @@ async function processArchive(job) {
   try {
     await deployLaravelRelease(
       job,
-      release,
+      laravelRoot,
     );
   } catch (error) {
     const stage =
@@ -499,7 +590,8 @@ async function processArchive(job) {
         : job.status;
 
     const sanitized =
-      error instanceof Error
+      error instanceof
+      Error
         ? error.message
         : "Deployment Laravel gagal.";
 
@@ -534,24 +626,42 @@ async function deployLaravelRelease(
   release,
 ) {
   const projectId =
-    job.payload.projectId;
+    job.payload
+      .projectId;
 
   console.log(
     `DEPLOY_START project=${projectId} job=${job.id}`,
   );
 
-  const slug = safeSlug(
-    job.payload.projectName ||
-      projectId,
-  );
+  const slug =
+    safeSlug(
+      job.payload
+        .projectName ||
+        projectId,
+    );
+
+  if (!slug) {
+    throw new DeployStageError(
+      "preparing",
+      "Nama project tidak dapat diubah menjadi nama sumber daya Docker yang aman.",
+    );
+  }
 
   const shortJobId =
     job.id
-      .replace(/-/g, "")
-      .slice(0, 12);
+      .replace(
+        /-/g,
+        "",
+      )
+      .slice(
+        0,
+        12,
+      );
 
   const network =
-    networkName(slug);
+    networkName(
+      slug,
+    );
 
   const candidateContainer =
     `${containerName(
@@ -598,15 +708,21 @@ async function deployLaravelRelease(
 
     try {
       await runOneShot({
-        image: "composer:2",
+        image:
+          "composer:2",
+
         command:
           composerInstallCommand().slice(
             1,
           ),
+
         volumes: [
           `${release}:/app`,
         ],
-        workdir: "/app",
+
+        workdir:
+          "/app",
+
         labels,
       });
     } catch (error) {
@@ -644,13 +760,19 @@ async function deployLaravelRelease(
 
     try {
       await runOneShot({
-        image: "node:22-alpine",
+        image:
+          "node:22-alpine",
+
         command:
           frontendBuildCommand(),
+
         volumes: [
           `${release}:/app`,
         ],
-        workdir: "/app",
+
+        workdir:
+          "/app",
+
         labels,
       });
     } catch (error) {
@@ -679,8 +801,13 @@ async function deployLaravelRelease(
     await buildImage({
       dockerfile:
         laravelDockerfile,
-      context: release,
-      tag: image,
+
+      context:
+        release,
+
+      tag:
+        image,
+
       labels,
     });
   } catch (error) {
@@ -718,17 +845,21 @@ async function deployLaravelRelease(
     await startContainer({
       name:
         candidateContainer,
+
       image,
+
       network,
+
       hostPort,
+
       containerPort:
         CONTAINER_PORT,
 
-      // .env is excluded from the Docker image and supplied only at runtime.
-      envFile: join(
-        release,
-        ".env",
-      ),
+      envFile:
+        join(
+          release,
+          ".env",
+        ),
 
       labels,
 
@@ -783,7 +914,9 @@ async function deployLaravelRelease(
 
     await removeContainerIfExists(
       candidateContainer,
-    ).catch(() => {});
+    ).catch(
+      () => {},
+    );
 
     throw new DeployStageError(
       "health_check",
@@ -803,8 +936,7 @@ async function deployLaravelRelease(
     "Health check HTTP berhasil.",
   );
 
-  // Only after the replacement container is healthy do we remove
-  // older containers belonging to this SAME NEXDEPLOY project.
+  // Container lama baru dibersihkan setelah replacement baru sehat.
   try {
     const existing =
       await listContainersByLabel(
@@ -827,8 +959,7 @@ async function deployLaravelRelease(
       }
     }
   } catch {
-    // Best-effort cleanup.
-    // Deployment success must not depend on old-container cleanup.
+    // Best effort.
   }
 
   job.status =
@@ -876,15 +1007,17 @@ async function transition(
 async function prepareLaravelEnvironment(
   release,
 ) {
-  const envPath = join(
-    release,
-    ".env",
-  );
+  const envPath =
+    join(
+      release,
+      ".env",
+    );
 
-  const examplePath = join(
-    release,
-    ".env.example",
-  );
+  const examplePath =
+    join(
+      release,
+      ".env.example",
+    );
 
   const dockerignorePath =
     join(
@@ -895,18 +1028,21 @@ async function prepareLaravelEnvironment(
   let base = "";
 
   try {
-    base = await readFile(
-      envPath,
-      "utf8",
-    );
-  } catch {
-    try {
-      base = await readFile(
-        examplePath,
+    base =
+      await readFile(
+        envPath,
         "utf8",
       );
+  } catch {
+    try {
+      base =
+        await readFile(
+          examplePath,
+          "utf8",
+        );
     } catch {
-      base = "";
+      base =
+        "";
     }
   }
 
@@ -922,9 +1058,7 @@ async function prepareLaravelEnvironment(
     "utf8",
   );
 
-  // IMPORTANT:
-  // .env contains runtime secrets and must NEVER be copied into
-  // a Docker image layer.
+  // Jangan pernah bake .env ke Docker image.
   let dockerignore = "";
 
   try {
@@ -934,10 +1068,10 @@ async function prepareLaravelEnvironment(
         "utf8",
       );
   } catch {
-    dockerignore = "";
+    dockerignore =
+      "";
   }
 
-  // Append .env at the END so it wins over any earlier !.env rule.
   const normalized =
     dockerignore.replace(
       /\s+$/,
@@ -986,40 +1120,45 @@ function waitForHealthy(
   } = {},
 ) {
   const deadline =
-    Date.now() + totalMs;
+    Date.now() +
+    totalMs;
 
   return new Promise(
     (resolveHealthy) => {
       const attempt = () => {
-        const request = http.get(
-          {
-            host:
-              "127.0.0.1",
-            port:
-              hostPort,
-            path:
-              "/",
-            timeout:
-              4000,
-          },
-          (response) => {
-            response.resume();
+        const request =
+          http.get(
+            {
+              host:
+                "127.0.0.1",
 
-            if (
-              response.statusCode &&
-              response.statusCode <
-                500
-            ) {
-              resolveHealthy(
-                true,
-              );
+              port:
+                hostPort,
 
-              return;
-            }
+              path:
+                "/",
 
-            retry();
-          },
-        );
+              timeout:
+                4000,
+            },
+            (response) => {
+              response.resume();
+
+              if (
+                response.statusCode &&
+                response.statusCode <
+                  500
+              ) {
+                resolveHealthy(
+                  true,
+                );
+
+                return;
+              }
+
+              retry();
+            },
+          );
 
         request.on(
           "timeout",
@@ -1082,7 +1221,9 @@ const server =
 
           if (
             supplied &&
-            !authorized(request)
+            !authorized(
+              request,
+            )
           ) {
             return json(
               response,
@@ -1110,19 +1251,27 @@ const server =
             response,
             200,
             {
-              ok: true,
+              ok:
+                true,
+
               version:
                 "0.3.0",
+
               mode:
                 "local",
+
               services: {
                 executor:
                   "ready",
+
                 workspace,
+
                 docker:
                   "cli-passthrough",
+
                 database:
                   "not-configured",
+
                 npm:
                   "not-configured",
               },
@@ -1131,7 +1280,9 @@ const server =
         }
 
         if (
-          !authorized(request)
+          !authorized(
+            request,
+          )
         ) {
           return json(
             response,
@@ -1150,7 +1301,9 @@ const server =
             "/jobs/deploy"
         ) {
           const payload =
-            await body(request);
+            await body(
+              request,
+            );
 
           if (
             !payload.projectId ||
@@ -1169,14 +1322,20 @@ const server =
           const job = {
             id:
               randomUUID(),
+
             type:
               "deploy",
+
             status:
               "awaiting_archive",
+
             payload,
+
             createdAt:
               new Date().toISOString(),
-            logs: [],
+
+            logs:
+              [],
           };
 
           jobs.set(
@@ -1197,6 +1356,7 @@ const server =
               job: {
                 id:
                   job.id,
+
                 status:
                   job.status,
               },
@@ -1244,8 +1404,11 @@ const server =
             );
           }
 
-          const chunks = [];
-          let bytes = 0;
+          const chunks =
+            [];
+
+          let bytes =
+            0;
 
           for await (
             const chunk of request
@@ -1297,6 +1460,7 @@ const server =
                   .archiveName,
               )}`,
             ),
+
             Buffer.concat(
               chunks,
             ),
@@ -1305,7 +1469,9 @@ const server =
           void processArchive(
             job,
           ).catch(
-            async (error) => {
+            async (
+              error,
+            ) => {
               const message =
                 error instanceof
                 Error
@@ -1333,7 +1499,8 @@ const server =
             response,
             202,
             {
-              ok: true,
+              ok:
+                true,
             },
           );
         }
@@ -1375,6 +1542,7 @@ const server =
               : {
                   job: {
                     ...job,
+
                     logs:
                       undefined,
                   },
