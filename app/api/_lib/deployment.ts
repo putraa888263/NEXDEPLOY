@@ -21,7 +21,13 @@ export async function syncExecutorDeployment(deploymentId: string) {
     if (!jobResponse.ok || !logResponse.ok) return;
     const job = await jobResponse.json() as { job?: { status?: string } };
     const output = await logResponse.json() as { logs?: ExecutorLog[] };
-    const status = job.job?.status === "succeeded" ? "Succeeded" : job.job?.status === "failed" ? "Failed" : job.job?.status === "waiting_vps" ? "WaitingExecutor" : job.job?.status === "awaiting_archive" ? "Queued" : "Running";
+    // Phase 1 Laravel runtime pipeline: waiting_vps -> preparing -> building
+    // -> starting -> health_check -> running. "running" is now a terminal
+    // success state alongside the legacy "succeeded" (kept for
+    // compatibility with any other executor job type). Every other
+    // intermediate state (preparing/building/starting/health_check) falls
+    // through to "Running" already, so no change needed there.
+    const status = job.job?.status === "succeeded" || job.job?.status === "running" ? "Succeeded" : job.job?.status === "failed" ? "Failed" : job.job?.status === "waiting_vps" ? "WaitingExecutor" : job.job?.status === "awaiting_archive" ? "Queued" : "Running";
     const now = new Date().toISOString();
     await db.prepare("UPDATE deployments SET status = ?, error = CASE WHEN ? = 'WaitingExecutor' THEN 'Executor menunggu konfigurasi VPS.' WHEN ? = 'Succeeded' THEN NULL ELSE error END, finished_at = CASE WHEN ? IN ('Succeeded','Failed') THEN COALESCE(finished_at, ?) ELSE finished_at END WHERE id = ?")
       .bind(status, status, status, status, now, deploymentId).run();

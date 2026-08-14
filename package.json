@@ -12,6 +12,7 @@
     "executor:dev": "node --watch executor/src/index.mjs",
     "executor:start": "node executor/src/index.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test:executor": "node --test \"executor/src/deployment/*.test.mjs\"",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
