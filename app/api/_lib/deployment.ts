@@ -22,7 +22,11 @@ export async function syncExecutorDeployment(deploymentId: string) {
     const job = await jobResponse.json() as { job?: { status?: string } };
     const output = await logResponse.json() as { logs?: ExecutorLog[] };
     const status = job.job?.status === "succeeded" ? "Succeeded" : job.job?.status === "failed" ? "Failed" : job.job?.status === "waiting_vps" ? "WaitingExecutor" : job.job?.status === "awaiting_archive" ? "Queued" : "Running";
-    await db.prepare("UPDATE deployments SET status = ?, error = CASE WHEN ? = 'WaitingExecutor' THEN 'Executor menunggu konfigurasi VPS.' ELSE error END WHERE id = ?").bind(status, status, deploymentId).run();
+    const now = new Date().toISOString();
+    await db.prepare("UPDATE deployments SET status = ?, error = CASE WHEN ? = 'WaitingExecutor' THEN 'Executor menunggu konfigurasi VPS.' WHEN ? = 'Succeeded' THEN NULL ELSE error END, finished_at = CASE WHEN ? IN ('Succeeded','Failed') THEN COALESCE(finished_at, ?) ELSE finished_at END WHERE id = ?")
+      .bind(status, status, status, status, now, deploymentId).run();
+    if (status === "Succeeded") await db.prepare("UPDATE projects SET status = 'Healthy', updated_at = ? WHERE id = ?").bind(now, deployment.project_id).run();
+    if (status === "Failed") await db.prepare("UPDATE projects SET status = 'Stopped', updated_at = ? WHERE id = ?").bind(now, deployment.project_id).run();
     for (const [index, log] of (output.logs ?? []).entries()) {
       const marker = `[executor:${deployment.executor_job_id}:${index}]`;
       const exists = await db.prepare("SELECT id FROM deployment_logs WHERE deployment_id = ? AND message LIKE ?").bind(deploymentId, `${marker}%`).first();
@@ -80,9 +84,10 @@ export async function processDeployment(deploymentId: string, project: ProjectFo
     await failDeployment(deploymentId, project.id, `Gagal mengirim job ke executor: ${message}`);
     return;
   }
-  const error = "Executor sedang menyiapkan release lokal. Konfigurasi Docker, Composer, database, dan NPM masih diperlukan.";
-  await db.prepare("UPDATE deployments SET status = 'WaitingExecutor', error = ?, finished_at = ? WHERE id = ?").bind(error, new Date().toISOString(), deploymentId).run();
-  await db.prepare("UPDATE projects SET status = 'Stopped', updated_at = ? WHERE id = ?").bind(new Date().toISOString(), project.id).run();
+  const current = await db.prepare("SELECT status FROM deployments WHERE id = ?").bind(deploymentId).first<{ status: string }>();
+  if (current?.status === "WaitingExecutor") {
+    await writeLog(deploymentId, "warning", "Executor menerima release tetapi masih menunggu kesiapan deployment VPS.");
+  }
 }
 
 async function failDeployment(deploymentId: string, projectId: string, error: string) {

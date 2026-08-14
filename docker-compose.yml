@@ -7,14 +7,16 @@ services:
     env_file: .env
     environment:
       NEXDEPLOY_ENCRYPTION_KEY: ${NEXDEPLOY_ENCRYPTION_KEY}
+      NEXA_SERVICE_SECRET: ${NEXA_SERVICE_SECRET}
       WRANGLER_WRITE_LOGS: "false"
     ports:
-      - "127.0.0.1:${PANEL_PORT:-3000}:3000"
+      - "10.90.100.3:${PANEL_PORT:-8088}:3000"
     volumes:
       - panel-state:/app/.wrangler
     depends_on:
       - executor
     networks:
+      - nexdeploy-public
       - nexdeploy-internal
 
   executor:
@@ -38,5 +40,8 @@ volumes:
   executor-projects:
 
 networks:
+  nexdeploy-public:
+    driver: bridge
+
   nexdeploy-internal:
     internal: true

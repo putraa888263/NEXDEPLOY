@@ -42,6 +42,8 @@ async function initialize(db: D1Database) {
     db.prepare("CREATE TABLE IF NOT EXISTS backup_jobs (id TEXT PRIMARY KEY, backup_id TEXT NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, finished_at TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS backup_logs (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS executor_settings (id INTEGER PRIMARY KEY, url TEXT NOT NULL, token_encrypted TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS nexa_service_nonces (nonce TEXT PRIMARY KEY, seen_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS nexa_service_requests (idempotency_key TEXT PRIMARY KEY, operation TEXT NOT NULL, project_id TEXT, result_json TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_activity_created_at ON activity(created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_login_attempts_locked_until ON login_attempts(locked_until)"),

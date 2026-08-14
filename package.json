@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
-    "start": "vinext start",
+    "start": "wrangler dev --local --persist-to .wrangler/state --ip 0.0.0.0",
     "executor:dev": "node --watch executor/src/index.mjs",
     "executor:start": "node executor/src/index.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@cloudflare/unenv-preset": "2.16.1",
-    "@rolldown/binding-win32-x64-msvc": "^1.2.3",
     "drizzle-orm": "0.45.2",
     "lucide-react": "^1.31.0",
     "react": "19.2.6",
@@ -50,6 +49,7 @@
   },
   "type": "module",
   "allowScripts": {
+    "esbuild@0.28.2": true,
     "esbuild@0.28.0": true,
     "esbuild@0.25.12": true,
     "esbuild@0.27.3": true,
