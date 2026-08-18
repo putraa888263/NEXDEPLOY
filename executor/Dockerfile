@@ -2,7 +2,8 @@ FROM node:22-alpine
 
 RUN apk add --no-cache \
     unzip \
-    docker-cli
+    docker-cli \
+    docker-cli-buildx
 
 WORKDIR /app
 

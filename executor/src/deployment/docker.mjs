@@ -381,19 +381,22 @@ export async function buildImage({
   }
 
   const args = [
-    "build",
-    "-f",
-    dockerfile,
-    "-t",
-    tag,
+  "buildx",
+  "build",
+  "--load",
+  "--progress=plain",
+  "-f",
+  dockerfile,
+  "-t",
+  tag,
 
-    ...labels.flatMap((entry) => [
-      "--label",
-      entry,
-    ]),
+  ...labels.flatMap((entry) => [
+    "--label",
+    entry,
+  ]),
 
-    context,
-  ];
+  context,
+];
 
   return runDocker(
     args,
