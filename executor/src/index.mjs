@@ -1214,6 +1214,7 @@ async function transition(
 
 async function prepareLaravelEnvironment(
   release,
+  overrides = {},
 ) {
   const envPath =
     join(
@@ -1257,7 +1258,7 @@ async function prepareLaravelEnvironment(
   const merged =
     mergeEnvFile(
       base,
-      buildRuntimeEnvironment(),
+      ({ ...buildRuntimeEnvironment(), ...overrides }),
     );
 
   await writeFile(
