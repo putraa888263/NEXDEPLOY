@@ -181,6 +181,7 @@ export function buildRuntimeEnvironment() {
     DB_CONNECTION: "sqlite",
     DB_DATABASE: "/dev/null",
 
+    CACHE_STORE: "array",
     CACHE_DRIVER: "array",
     SESSION_DRIVER: "array",
     QUEUE_CONNECTION: "sync",
@@ -191,7 +192,7 @@ export function buildEntrypointCommand() {
   return [
     "sh",
     "-c",
-    `set -e; cd /var/www/html; (php artisan storage:link || true); (php artisan optimize:clear || true); exec php artisan serve --host=0.0.0.0 --port=${CONTAINER_PORT}`,
+    `set -e; cd /var/www/html; (php artisan storage:link || true); exec php artisan serve --host=0.0.0.0 --port=${CONTAINER_PORT}`,
   ];
 }
 
