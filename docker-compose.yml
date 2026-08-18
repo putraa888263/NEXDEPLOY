@@ -36,9 +36,28 @@ services:
     networks:
       - nexdeploy-internal
 
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NEXDEPLOY_POSTGRES_DB:-nexdeploy}
+      POSTGRES_USER: ${NEXDEPLOY_POSTGRES_USER:-nexdeploy_admin}
+      POSTGRES_PASSWORD: ${NEXDEPLOY_POSTGRES_PASSWORD:?NEXDEPLOY_POSTGRES_PASSWORD is required in .env}
+    volumes:
+      - nexdeploy-postgres-data:/var/lib/postgresql/data
+    networks:
+      - nexdeploy-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   panel-state:
   executor-projects:
+  nexdeploy-postgres-data:
 
 networks:
   nexdeploy-public:
