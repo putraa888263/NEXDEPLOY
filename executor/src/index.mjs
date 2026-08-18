@@ -702,6 +702,36 @@ async function deployLaravelRelease(
     release,
   );
 
+  await log(
+    job,
+    "info",
+    "Menghapus cache package Laravel lama.",
+  );
+
+  await rm(
+    join(
+      release,
+      "bootstrap",
+      "cache",
+      "packages.php",
+    ),
+    {
+      force: true,
+    },
+  );
+
+  await rm(
+    join(
+      release,
+      "bootstrap",
+      "cache",
+      "services.php",
+    ),
+    {
+      force: true,
+    },
+  );
+
   if (
     await shouldRunComposer(
       release,

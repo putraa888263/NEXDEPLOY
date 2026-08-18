@@ -153,7 +153,6 @@ export function composerInstallCommand() {
     "--prefer-dist",
     "--no-interaction",
     "--optimize-autoloader",
-    "--no-scripts",
   ];
 }
 
