@@ -754,7 +754,6 @@ async function deployLaravelRelease(
       await runOneShot({
         image:
           "nexdeploy/laravel-runtime:php-8.4",
-        network: process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal",
         command:
           composerInstallCommand(),
 
