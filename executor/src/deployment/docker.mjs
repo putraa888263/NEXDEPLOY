@@ -94,7 +94,7 @@ export function networkExists(name) {
   );
 }
 
-export async function ensureNetwork(name, labels = []) {
+export async function ensureNetwork(name, labels = [], internal = false) {
   assertName(name, "network");
 
   if (await networkExists(name)) {
@@ -106,6 +106,7 @@ export async function ensureNetwork(name, labels = []) {
     "create",
     "--driver",
     "bridge",
+    ...(internal ? ["--internal"] : []),
     ...labels.flatMap((entry) => [
       "--label",
       entry,
@@ -150,6 +151,7 @@ export function buildStartContainerArgs({
   name,
   image,
   network,
+  additionalNetworks = [],
   hostPort,
   containerPort,
   env = {},
@@ -191,7 +193,13 @@ export function buildStartContainerArgs({
     "unless-stopped",
     "-p",
     `${hostPort}:${containerPort}`,
+  ];
 
+  for (const net of additionalNetworks) {
+    args.push("--network", net);
+  }
+
+  args.push(
     ...labels.flatMap((entry) => [
       "--label",
       entry,
@@ -212,9 +220,8 @@ export function buildStartContainerArgs({
       "-v",
       entry,
     ]),
-  ];
+  );
 
-  // Semua opsi `docker run` harus berada sebelum nama image.
   if (healthcheck) {
     args.push(
       "--health-cmd",
@@ -242,7 +249,6 @@ export function buildStartContainerArgs({
     );
   }
 
-  // Image harus diletakkan setelah seluruh opsi docker run.
   args.push(
     image,
     ...command,
@@ -252,8 +258,6 @@ export function buildStartContainerArgs({
 }
 
 export async function startContainer(options) {
-  // Candidate container memiliki nama job-specific.
-  // Container deployment lama tidak disentuh pada tahap ini.
   await removeContainerIfExists(
     options.name,
   );
@@ -333,6 +337,7 @@ export function removeNetwork(name) {
 export async function runOneShot({
   image,
   network = null,
+  additionalNetworks = [],
   command,
   volumes = [],
   workdir = "/var/www/html",
@@ -352,7 +357,13 @@ export async function runOneShot({
     ...(network
       ? ["--network", network]
       : []),
+  ];
 
+  for (const net of additionalNetworks) {
+    args.push("--network", net);
+  }
+
+  args.push(
     ...volumes.flatMap((entry) => [
       "-v",
       entry,
@@ -371,7 +382,7 @@ export async function runOneShot({
     image,
 
     ...command,
-  ];
+  );
 
   return runDocker(
     args,

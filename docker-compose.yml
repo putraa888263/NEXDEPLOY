@@ -30,6 +30,12 @@ services:
       EXECUTOR_TOKEN: ${EXECUTOR_TOKEN}
       PROJECTS_DIR: /opt/nexdeploy/projects
       PROJECTS_VOLUME: ${PROJECTS_VOLUME:-nexdeploy_executor-projects}
+      NEXDEPLOY_POSTGRES_HOST: postgres
+      NEXDEPLOY_POSTGRES_PORT: "5432"
+      NEXDEPLOY_POSTGRES_DB: ${NEXDEPLOY_POSTGRES_DB:-nexdeploy}
+      NEXDEPLOY_POSTGRES_USER: ${NEXDEPLOY_POSTGRES_USER:-nexdeploy_admin}
+      NEXDEPLOY_POSTGRES_PASSWORD: ${NEXDEPLOY_POSTGRES_PASSWORD:?NEXDEPLOY_POSTGRES_PASSWORD is required in .env}
+      NEXDEPLOY_INTERNAL_NETWORK: ${NEXDEPLOY_INTERNAL_NETWORK:-nexdeploy_nexdeploy-internal}
     volumes:
       - executor-projects:/opt/nexdeploy/projects
       - /var/run/docker.sock:/var/run/docker.sock

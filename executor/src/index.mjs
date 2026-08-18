@@ -59,6 +59,10 @@ import {
 } from "./deployment/docker.mjs";
 
 import {
+  ensureProjectDatabase,
+} from "./deployment/postgres.mjs";
+
+import {
   resolveLaravelReleaseRoot,
   shouldRunComposer,
   shouldRunFrontendBuild,
@@ -697,12 +701,35 @@ async function deployLaravelRelease(
   await transition(
     job,
     "preparing",
-    "Menyiapkan release Laravel (environment dan composer).",
+    "Menyiapkan release Laravel (database dan environment).",
   );
 
-  await prepareLaravelEnvironment(
-    release,
-  );
+  const dbConfig = {
+    adminDb: process.env.NEXDEPLOY_POSTGRES_DB,
+    adminUser: process.env.NEXDEPLOY_POSTGRES_USER,
+    adminPass: process.env.NEXDEPLOY_POSTGRES_PASSWORD,
+    postgresHost: process.env.NEXDEPLOY_POSTGRES_HOST || "postgres",
+    postgresPort: process.env.NEXDEPLOY_POSTGRES_PORT || "5432",
+    internalNetwork: process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal",
+    projectsDir,
+    projectsVolume
+  };
+
+  if (!dbConfig.adminDb || !dbConfig.adminUser || !dbConfig.adminPass) {
+    throw new DeployStageError("preparing", "PostgreSQL admin configuration missing.");
+  }
+
+  const dbMetadata = await ensureProjectDatabase(projectId, dbConfig);
+  const dbOverrides = {
+      DB_CONNECTION: "pgsql",
+      DB_HOST: dbMetadata.host,
+      DB_PORT: String(dbMetadata.port),
+      DB_DATABASE: dbMetadata.database,
+      DB_USERNAME: dbMetadata.username,
+      DB_PASSWORD: dbMetadata.password
+  };
+
+  await prepareLaravelEnvironment(release, dbOverrides);
 
   await log(
     job,
@@ -727,7 +754,7 @@ async function deployLaravelRelease(
       await runOneShot({
         image:
           "nexdeploy/laravel-runtime:php-8.4",
-
+        network: process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal",
         command:
           composerInstallCommand(),
 
@@ -778,6 +805,25 @@ async function deployLaravelRelease(
         "preparing",
         `Laravel package discovery gagal: ${summarizeFailure(error?.message)}`,
       );
+    }
+
+    await log(
+      job,
+      "info",
+      "Menjalankan migrasi database Laravel.",
+    );
+
+    try {
+      await runOneShot({
+        image: "nexdeploy/laravel-runtime:php-8.4",
+        network: process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal",
+        workdir: release,
+        volumes: [`${projectsVolume}:${projectsDir}`],
+        command: ["php", "artisan", "migrate", "--force"],
+      });
+      await log(job, "success", "Migrasi database Laravel selesai.");
+    } catch (e) {
+      throw new DeployStageError("preparing", summarizeFailure(e));
     }
 
     await log(
@@ -946,6 +992,7 @@ async function deployLaravelRelease(
       image,
 
       network,
+      additionalNetworks: [process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal"],
 
       hostPort,
 
@@ -1058,6 +1105,7 @@ async function deployLaravelRelease(
         name: candidateContainer,
         image,
         network,
+        additionalNetworks: [process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal"],
         hostPort: stableHostPort,
         containerPort: CONTAINER_PORT,
         envFile: join(release, ".env"),
