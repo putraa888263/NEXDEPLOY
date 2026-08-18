@@ -1,6 +1,7 @@
 import {
   access,
   readdir,
+  rm,
 } from "node:fs/promises";
 
 import {
@@ -162,6 +163,26 @@ export function frontendBuildCommand() {
     "-c",
     "if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi && npm run build",
   ];
+}
+
+export function packageDiscoverCommand() {
+  return [
+    "php",
+    "artisan",
+    "package:discover",
+    "--ansi",
+  ];
+}
+
+export async function clearLaravelBootstrapCache(root) {
+  await rm(
+    join(root, "bootstrap", "cache", "packages.php"),
+    { force: true }
+  );
+  await rm(
+    join(root, "bootstrap", "cache", "services.php"),
+    { force: true }
+  );
 }
 
 export function appKey() {

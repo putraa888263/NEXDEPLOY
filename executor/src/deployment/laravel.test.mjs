@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  access,
   mkdir,
   mkdtemp,
   rm,
@@ -29,6 +30,8 @@ import {
   shouldRunComposer,
   shouldRunFrontendBuild,
   summarizeFailure,
+  packageDiscoverCommand,
+  clearLaravelBootstrapCache,
 } from "./laravel.mjs";
 
 test(
@@ -420,6 +423,76 @@ test(
       command[2],
       /npm run build/,
     );
+  },
+);
+
+test(
+  "packageDiscoverCommand: production-safe command",
+  () => {
+    const command =
+      packageDiscoverCommand();
+
+    assert.deepEqual(
+      command,
+      [
+        "php",
+        "artisan",
+        "package:discover",
+        "--ansi",
+      ],
+    );
+  },
+);
+
+test(
+  "clearLaravelBootstrapCache: removes packages.php and services.php, no error if missing",
+  async () => {
+    const root =
+      await mkdtemp(
+        join(
+          tmpdir(),
+          "nexdeploy-clear-cache-",
+        ),
+      );
+
+    const cacheDir =
+      join(
+        root,
+        "bootstrap",
+        "cache",
+      );
+
+    try {
+      await mkdir(
+        cacheDir,
+        {
+          recursive: true,
+        },
+      );
+
+      const packages = join(cacheDir, "packages.php");
+      const services = join(cacheDir, "services.php");
+
+      // Test case 1: Files exist, should be removed
+      await writeFile(packages, "test");
+      await writeFile(services, "test");
+
+      await clearLaravelBootstrapCache(root);
+
+      await assert.rejects(access(packages), { code: "ENOENT" });
+      await assert.rejects(access(services), { code: "ENOENT" });
+
+      // Test case 2: Files do not exist, should not throw
+      await assert.doesNotReject(clearLaravelBootstrapCache(root));
+    } finally {
+      await rm(
+        root,
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    }
   },
 );
 

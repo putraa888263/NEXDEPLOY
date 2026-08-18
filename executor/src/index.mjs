@@ -69,6 +69,8 @@ import {
   mergeEnvFile,
   summarizeFailure,
   CONTAINER_PORT,
+  clearLaravelBootstrapCache,
+  packageDiscoverCommand,
 } from "./deployment/laravel.mjs";
 
 const executorDir =
@@ -708,29 +710,7 @@ async function deployLaravelRelease(
     "Menghapus cache package Laravel lama.",
   );
 
-  await rm(
-    join(
-      release,
-      "bootstrap",
-      "cache",
-      "packages.php",
-    ),
-    {
-      force: true,
-    },
-  );
-
-  await rm(
-    join(
-      release,
-      "bootstrap",
-      "cache",
-      "services.php",
-    ),
-    {
-      force: true,
-    },
-  );
+  await clearLaravelBootstrapCache(release);
 
   if (
     await shouldRunComposer(
@@ -773,6 +753,37 @@ async function deployLaravelRelease(
       job,
       "success",
       "Composer install selesai.",
+    );
+
+    await log(
+      job,
+      "info",
+      "Membangun ulang Laravel package discovery manifest.",
+    );
+
+    await clearLaravelBootstrapCache(release);
+
+    try {
+      await runOneShot({
+        image: "nexdeploy/laravel-runtime:php-8.4",
+        command: packageDiscoverCommand(),
+        volumes: [
+          `${projectsVolume}:${projectsDir}`,
+        ],
+        workdir: release,
+        labels,
+      });
+    } catch (error) {
+      throw new DeployStageError(
+        "preparing",
+        `Laravel package discovery gagal: ${summarizeFailure(error?.message)}`,
+      );
+    }
+
+    await log(
+      job,
+      "success",
+      "Laravel package discovery manifest berhasil dibangun ulang.",
     );
   }
 
