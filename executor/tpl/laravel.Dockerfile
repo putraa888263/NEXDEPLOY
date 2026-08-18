@@ -1,4 +1,4 @@
-FROM nexdeploy/laravel-runtime:php-8.3
+FROM nexdeploy/laravel-runtime:php-8.4
 
 WORKDIR /var/www/html
 

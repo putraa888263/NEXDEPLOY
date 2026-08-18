@@ -716,7 +716,7 @@ async function deployLaravelRelease(
     try {
       await runOneShot({
         image:
-          "nexdeploy/laravel-runtime:php-8.3",
+          "nexdeploy/laravel-runtime:php-8.4",
 
         command:
           composerInstallCommand(),
