@@ -161,7 +161,7 @@ export function frontendBuildCommand() {
   return [
     "sh",
     "-c",
-    "test -f package-lock.json || { echo 'package-lock.json wajib tersedia untuk build frontend deterministic.' >&2; exit 2; }; npm ci --no-audit --no-fund && npm run build",
+    "if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi && npm run build",
   ];
 }
 

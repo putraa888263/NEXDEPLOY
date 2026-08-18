@@ -163,6 +163,11 @@ const projectsDir =
       "./executor-work",
   );
 
+  const projectsVolume =
+  process.env.PROJECTS_VOLUME ||
+  "nexdeploy_executor-projects";
+
+
 const stateDir =
   join(
     projectsDir,
@@ -717,11 +722,11 @@ async function deployLaravelRelease(
           ),
 
         volumes: [
-          `${release}:/app`,
+          `${projectsVolume}:${projectsDir}`,
         ],
 
         workdir:
-          "/app",
+          release,
 
         labels,
       });
@@ -767,11 +772,11 @@ async function deployLaravelRelease(
           frontendBuildCommand(),
 
         volumes: [
-          `${release}:/app`,
+          `${projectsVolume}:${projectsDir}`,
         ],
 
         workdir:
-          "/app",
+          release,
 
         labels,
       });

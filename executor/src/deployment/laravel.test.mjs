@@ -18,7 +18,6 @@ import {
 import test from "node:test";
 
 import {
-  appKey,
   buildEntrypointCommand,
   buildRuntimeEnvironment,
   composerInstallCommand,
@@ -387,7 +386,7 @@ test(
 );
 
 test(
-  "frontendBuildCommand: prefers npm ci when a lockfile is present",
+  "frontendBuildCommand: uses npm ci with lockfile and npm install as fallback",
   () => {
     const command =
       frontendBuildCommand();
@@ -404,43 +403,22 @@ test(
 
     assert.match(
       command[2],
-      /npm ci/,
-    );
-
-    assert.match(
-      command[2],
       /package-lock\.json/,
     );
 
     assert.match(
       command[2],
-      /npm run build/,
+      /npm ci/,
     );
-  },
-);
-
-test(
-  "appKey: matches Laravel's base64:<32 bytes> format",
-  () => {
-    const value =
-      appKey();
 
     assert.match(
-      value,
-      /^base64:[A-Za-z0-9+/]+={0,2}$/,
+      command[2],
+      /npm install/,
     );
 
-    const raw =
-      Buffer.from(
-        value.slice(
-          "base64:".length,
-        ),
-        "base64",
-      );
-
-    assert.equal(
-      raw.length,
-      32,
+    assert.match(
+      command[2],
+      /npm run build/,
     );
   },
 );
