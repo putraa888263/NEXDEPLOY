@@ -2,7 +2,7 @@ import {
   createServer,
 } from "node:http";
 
-import http from "node:http";
+
 
 import {
   mkdir,
@@ -54,6 +54,7 @@ import {
   listContainersByLabel,
   removeContainerIfExists,
   diagnoseContainer,
+  containerHttpHealthy,
 } from "./deployment/docker.mjs";
 
 import {
@@ -906,7 +907,8 @@ async function deployLaravelRelease(
 
   const healthy =
     await waitForHealthy(
-      hostPort,
+      candidateContainer,
+      CONTAINER_PORT,
     );
 
   if (!healthy) {
@@ -1131,89 +1133,42 @@ await writeFile(
   }
 }
 
-function waitForHealthy(
-  hostPort,
+async function waitForHealthy(
+  container,
+  containerPort,
   {
     totalMs = 60000,
     intervalMs = 3000,
   } = {},
 ) {
   const deadline =
-    Date.now() +
-    totalMs;
+    Date.now() + totalMs;
 
-  return new Promise(
-    (resolveHealthy) => {
-      const attempt = () => {
-        const request =
-          http.get(
-            {
-              host:
-                "127.0.0.1",
+  while (
+    Date.now() < deadline
+  ) {
+    if (
+      await containerHttpHealthy(
+        container,
+        containerPort,
+      )
+    ) {
+      return true;
+    }
 
-              port:
-                hostPort,
+    await new Promise(
+      (resolveWait) =>
+        setTimeout(
+          resolveWait,
+          intervalMs,
+        ),
+    );
+  }
 
-              path:
-                "/",
-
-              timeout:
-                4000,
-            },
-            (response) => {
-              response.resume();
-
-              if (
-                response.statusCode &&
-                response.statusCode <
-                  500
-              ) {
-                resolveHealthy(
-                  true,
-                );
-
-                return;
-              }
-
-              retry();
-            },
-          );
-
-        request.on(
-          "timeout",
-          () => {
-            request.destroy();
-          },
-        );
-
-        request.on(
-          "error",
-          retry,
-        );
-
-        function retry() {
-          if (
-            Date.now() >=
-            deadline
-          ) {
-            resolveHealthy(
-              false,
-            );
-
-            return;
-          }
-
-          setTimeout(
-            attempt,
-            intervalMs,
-          );
-        }
-      };
-
-      attempt();
-    },
-  );
+  return false;
 }
+
+
 
 const server =
   createServer(

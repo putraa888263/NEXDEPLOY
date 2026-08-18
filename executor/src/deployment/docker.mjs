@@ -429,7 +429,10 @@ export async function diagnoseContainer(
   name,
   lines = 80,
 ) {
-  assertName(name, "container");
+  assertName(
+    name,
+    "container",
+  );
 
   try {
     const logs =
@@ -442,21 +445,101 @@ export async function diagnoseContainer(
       ]);
 
     const escape =
-  String.fromCharCode(27);
+      String.fromCharCode(27);
 
-const pattern =
-  new RegExp(
-    `${escape}\\[[0-9;]*[a-zA-Z]`,
-    "g",
-  );
+    const pattern =
+      new RegExp(
+        `${escape}\\[[0-9;]*[a-zA-Z]`,
+        "g",
+      );
 
-return logs
-  .replace(
-    pattern,
-    "",
-  )
-  .trim();
+    return logs
+      .replace(
+        pattern,
+        "",
+      )
+      .trim();
   } catch {
     return "";
+  }
+}
+
+export async function containerHttpHealthy(
+  name,
+  port,
+) {
+  assertName(
+    name,
+    "container",
+  );
+
+  if (
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  ) {
+    throw new Error(
+      `port health check tidak valid: ${port}`,
+    );
+  }
+
+  const phpCode = `
+$errno = 0;
+$errstr = "";
+
+$socket = @fsockopen(
+    "127.0.0.1",
+    ${port},
+    $errno,
+    $errstr,
+    3
+);
+
+if (!$socket) {
+    exit(1);
+}
+
+fwrite(
+    $socket,
+    "GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n"
+);
+
+$status = fgets($socket);
+fclose($socket);
+
+if (!$status) {
+    exit(1);
+}
+
+if (
+    preg_match(
+        '/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d{3})/',
+        $status,
+        $matches
+    )
+) {
+    $code = (int) $matches[1];
+
+    if ($code < 500) {
+        echo $code;
+        exit(0);
+    }
+}
+
+exit(1);
+`;
+
+  try {
+    await runDocker([
+      "exec",
+      name,
+      "php",
+      "-r",
+      phpCode,
+    ]);
+
+    return true;
+  } catch {
+    return false;
   }
 }
