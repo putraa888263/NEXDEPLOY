@@ -323,7 +323,7 @@ export default function Home() {
 
         <div className="content-wrap">
           {selected ? (
-            <ProjectDetail project={selected} tab={detailTab} setTab={setDetailTab} onBack={() => setSelected(null)} onToggle={() => toggleProject(selected)} onDeploy={() => deployProject(selected)} onUpload={(file) => uploadProjectArchive(selected, file)} notify={notify} canOperate={canOperate} />
+            <ProjectDetail project={selected} tab={detailTab} setTab={setDetailTab} onBack={() => setSelected(null)} onToggle={() => toggleProject(selected)} onDeploy={() => deployProject(selected)} onUpload={(file) => uploadProjectArchive(selected, file)} notify={notify} canOperate={canOperate} refreshProjects={loadPanel} />
           ) : (
             <>
               <div className="page-heading">
@@ -401,7 +401,7 @@ function ProjectsView({ projects, query, setQuery, filter, setFilter, openProjec
   </div>;
 }
 
-function ProjectDetail({ project, tab, setTab, onBack, onToggle, onDeploy, onUpload, notify, canOperate }: { project: Project; tab: string; setTab: (tab: string) => void; onBack: () => void; onToggle: () => void; onDeploy: () => Promise<void>; onUpload: (file: File) => Promise<void>; notify: (message: string) => void; canOperate: boolean }) {
+function ProjectDetail({ project, tab, setTab, onBack, onToggle, onDeploy, onUpload, notify, canOperate, refreshProjects }: { project: Project; tab: string; setTab: (tab: string) => void; onBack: () => void; onToggle: () => void; onDeploy: () => Promise<void>; onUpload: (file: File) => Promise<void>; notify: (message: string) => void; canOperate: boolean; refreshProjects: () => void }) {
   const tabs = [["overview", "Ringkasan"], ["deployments", "Deployment"], ["environment", "Environment"], ["resources", "Resource"], ["database", "Database"], ["backups", "Backup"], ["logs", "Log"]];
   return <>
     <button className="back-btn" onClick={onBack}><ChevronLeft size={18} />Kembali ke project</button>
@@ -411,7 +411,7 @@ function ProjectDetail({ project, tab, setTab, onBack, onToggle, onDeploy, onUpl
     </section>
     <div className="detail-tabs">{tabs.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}</div>
     {tab === "overview" && <OverviewTab project={project} notify={notify} />}
-    {tab === "deployments" && <DeploymentsTab projectId={project.id} />}
+    {tab === "deployments" && <DeploymentsTab projectId={project.id} refreshProjects={refreshProjects} />}
     {tab === "environment" && <EnvironmentTab project={project} notify={notify} canOperate={canOperate} />}
     {tab === "resources" && <ResourcesTab project={project} notify={notify} canOperate={canOperate} />}
     {tab === "database" && <DatabaseTab project={project} notify={notify} canOperate={canOperate} />}
@@ -440,10 +440,32 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
   return <section className={`panel log-panel ${compact ? "compact" : ""}`}><div className="panel-head dark"><div><h2>Log deployment</h2><p>{deployment ? deployment.archiveName : "Belum ada deployment"}</p></div><span><i />{deployment?.status ?? "Menunggu"}</span></div><div className="terminal">{logs.length ? logs.map((log) => <p key={log.id}><time>{new Date(log.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span className={log.level === "success" ? "success" : log.level === "warning" ? "done" : log.level === "error" ? "error" : "done"}>{log.level.toUpperCase()}</span><code>{log.message}</code></p>) : <p><code>Belum ada log deployment untuk project ini.</code></p>}</div>{compact && <button className="terminal-footer">Lihat log lengkap <ExternalLink size={14} /></button>}</section>;
 }
 
-function DeploymentsTab({ projectId }: { projectId: string }) {
+function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; refreshProjects: () => void }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
-  useEffect(() => { void fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()).then((data) => setDeployments(data.deployments ?? [])); }, [projectId]);
-  const refresh = async () => { const data = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()); setDeployments(data.deployments ?? []); };
+
+  const refresh = async () => {
+    const data = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json());
+    setDeployments(data.deployments ?? []);
+    return data.deployments ?? [];
+  };
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    const poll = async () => {
+      const deps = await refresh();
+      const latest = deps[0];
+      if (latest && (latest.status === "Succeeded" || latest.status === "Failed")) {
+        refreshProjects();
+        clearInterval(interval);
+      }
+    };
+
+    poll();
+    interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+
+  }, [projectId, refreshProjects]);
+
   const retry = async (deployment: Deployment) => { const response = await fetch(`/api/deployments/${deployment.id}/retry`, { method: "POST" }); const result = await response.json(); if (!response.ok) return; await refresh(); };
   const rollback = async () => { const response = await fetch(`/api/projects/${projectId}/rollback`, { method: "POST" }); if (response.ok) await refresh(); };
   const duration = (deployment: Deployment) => deployment.startedAt && deployment.finishedAt ? `${Math.max(0, Math.round((new Date(deployment.finishedAt).getTime() - new Date(deployment.startedAt).getTime()) / 1000))} detik` : "-";
