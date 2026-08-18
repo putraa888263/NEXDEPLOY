@@ -714,12 +714,10 @@ async function deployLaravelRelease(
     try {
       await runOneShot({
         image:
-          "composer:2",
+          "nexdeploy/laravel-runtime:php-8.3",
 
         command:
-          composerInstallCommand().slice(
-            1,
-          ),
+          composerInstallCommand(),
 
         volumes: [
           `${projectsVolume}:${projectsDir}`,

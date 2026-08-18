@@ -1,3 +1,5 @@
+FROM composer:2 AS composer-bin
+
 FROM php:8.3-cli-alpine
 
 RUN apk add --no-cache \
@@ -24,6 +26,8 @@ RUN apk add --no-cache \
         opcache \
         pcntl \
     && apk del .build-deps
+
+COPY --from=composer-bin /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /var/www/html
 
