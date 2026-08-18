@@ -27,12 +27,22 @@ RUN apk add --no-cache \
         pcntl \
     && apk del .build-deps
 
-COPY --from=composer-bin /usr/bin/composer /usr/local/bin/composer
+COPY --from=composer-bin \
+    /usr/bin/composer \
+    /usr/local/bin/composer
 
 WORKDIR /var/www/html
 
-RUN adduser -D -H -u 1000 nexdeploy
+RUN adduser -D -u 1000 nexdeploy \
+    && mkdir -p /home/nexdeploy/.composer/cache \
+    && chown -R nexdeploy:nexdeploy /home/nexdeploy
 
-USER nexdeploy
+# PENTING:
+# Tidak memakai USER nexdeploy di base image.
+# Image ini juga dipakai sebagai Composer/build environment,
+# sehingga build step harus dapat menulis ke release volume root-owned.
+#
+# Container aplikasi final akan berpindah ke USER nexdeploy
+# di executor/tpl/laravel.Dockerfile.
 
 EXPOSE 8080
