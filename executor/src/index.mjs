@@ -55,6 +55,7 @@ import {
   removeContainerIfExists,
   diagnoseContainer,
   containerHttpHealthy,
+  getContainerHostPort,
 } from "./deployment/docker.mjs";
 
 import {
@@ -835,16 +836,67 @@ async function deployLaravelRelease(
     "Menjalankan kontainer aplikasi.",
   );
 
-  let hostPort;
+  const existingContainers = await listContainersByLabel(
+    label(PROJECT_LABEL_KEY, slug),
+  );
+
+  const stablePortPath = join(
+    projectsDir,
+    projectId,
+    ".nexdeploy-stable-port",
+  );
+
+  let stableHostPort = null;
+
+  try {
+    stableHostPort = Number(
+      (await readFile(stablePortPath, "utf8")).trim(),
+    );
+
+    if (
+      !Number.isInteger(stableHostPort) ||
+      stableHostPort < 1 ||
+      stableHostPort > 65535
+    ) {
+      stableHostPort = null;
+    }
+  } catch {
+    stableHostPort = null;
+  }
+
+  if (
+    !stableHostPort &&
+    existingContainers.length > 0
+  ) {
+    stableHostPort = await getContainerHostPort(
+      existingContainers[0],
+      CONTAINER_PORT,
+    );
+  }
+
+  if (!stableHostPort) {
+    stableHostPort = await allocateHostPort();
+  }
+
+  await writeFile(
+    stablePortPath,
+    String(stableHostPort),
+    "utf8",
+  );
+
+  let candidateHostPort = stableHostPort;
+
+  if (existingContainers.length > 0) {
+    candidateHostPort = await allocateHostPort();
+  }
+
+  let hostPort = candidateHostPort;
 
   try {
     await ensureNetwork(
       network,
       labels,
     );
-
-    hostPort =
-      await allocateHostPort();
 
     await startContainer({
       name:
@@ -941,32 +993,95 @@ async function deployLaravelRelease(
     "Health check HTTP berhasil.",
   );
 
-  // Container lama baru dibersihkan setelah replacement baru sehat.
-  try {
-    const existing =
-      await listContainersByLabel(
-        label(
-          PROJECT_LABEL_KEY,
-          slug,
-        ),
+  // Candidate sudah sehat. Lakukan cutover ke stable port project.
+  if (candidateHostPort !== stableHostPort) {
+    await log(
+      job,
+      "info",
+      `Candidate sehat. Melakukan cutover dari temporary port ${candidateHostPort} ke stable port ${stableHostPort}.`,
+    );
+
+    try {
+      // Hapus seluruh container lama project kecuali candidate.
+      for (const name of existingContainers) {
+        if (name !== candidateContainer) {
+          await removeContainerIfExists(name);
+        }
+      }
+
+      // Candidate temporary harus dilepas agar image yang sama dapat
+      // dijalankan ulang menggunakan stable host port.
+      await removeContainerIfExists(candidateContainer);
+
+      await startContainer({
+        name: candidateContainer,
+        image,
+        network,
+        hostPort: stableHostPort,
+        containerPort: CONTAINER_PORT,
+        envFile: join(release, ".env"),
+        labels,
+        command: buildEntrypointCommand(),
+      });
+
+      const finalHealthy = await waitForHealthy(
+        candidateContainer,
+        CONTAINER_PORT,
       );
 
-    for (
-      const name of existing
-    ) {
-      if (
-        name !==
-        candidateContainer
-      ) {
+      if (!finalHealthy) {
+        const diagnostics = await diagnoseContainer(
+          candidateContainer,
+        );
+
         await removeContainerIfExists(
-          name,
+          candidateContainer,
+        ).catch(() => {});
+
+        throw new DeployStageError(
+          "health_check",
+          `Final container pada stable port ${stableHostPort} gagal health check.${
+            diagnostics
+              ? ` Log terakhir: ${summarizeFailure(diagnostics)}`
+              : ""
+          }`,
         );
       }
+
+      hostPort = stableHostPort;
+
+      await log(
+        job,
+        "success",
+        `Release baru aktif pada stable host port ${stableHostPort}.`,
+      );
+    } catch (error) {
+      if (error instanceof DeployStageError) {
+        throw error;
+      }
+
+      throw new DeployStageError(
+        "starting",
+        `Cutover ke stable port gagal: ${summarizeFailure(error?.message)}`,
+      );
     }
-  } catch {
-    // Best effort.
+  } else {
+    // Deployment pertama atau stable port sedang tidak dipakai.
+    // Bersihkan container project lama bila masih ada.
+    try {
+      for (const name of existingContainers) {
+        if (name !== candidateContainer) {
+          await removeContainerIfExists(name);
+        }
+      }
+    } catch {
+      // Best effort cleanup.
+    }
+
+    hostPort = stableHostPort;
   }
 
+  job.hostPort = stableHostPort;
   job.status =
     "running";
 

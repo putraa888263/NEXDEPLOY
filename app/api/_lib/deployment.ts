@@ -90,7 +90,7 @@ export async function syncExecutorDeployment(deploymentId: string) {
 
     const executorStatus =
       job.job?.status;
-    const finishedAt = job.job?.finishedAt;
+  const finishedAt = job.job?.finishedAt;
 
     const status =
       executorStatus === "succeeded" || (executorStatus === "running" && finishedAt)

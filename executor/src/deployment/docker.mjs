@@ -266,6 +266,25 @@ export async function startContainer(options) {
   return runDocker(args);
 }
 
+export async function getContainerHostPort(name, containerPort) {
+  assertName(name, "container");
+  const output = await runDocker([
+    "container",
+    "inspect",
+    name,
+    "--format",
+    "{{json .NetworkSettings.Ports}}",
+  ]);
+  const ports = JSON.parse(output.trim());
+  const key = `${containerPort}/tcp`;
+  if (ports[key] && ports[key][0] && ports[key][0].HostPort) {
+    return Number.parseInt(ports[key][0].HostPort, 10);
+  }
+  throw new Error(
+    `Host port tidak ditemukan untuk container ${name} pada port ${containerPort}`,
+  );
+}
+
 export async function containerRunning(name) {
   assertName(name, "container");
 
