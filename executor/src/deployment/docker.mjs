@@ -56,8 +56,8 @@ function runDocker(args, { allowExitCodes = [0] } = {}) {
       reject(
         new Error(
           `docker ${args[0]} exit ${code}: ${
-            stderr.slice(0, 400) ||
-            stdout.slice(0, 400) ||
+            stderr.slice(-2000) ||
+            stdout.slice(-2000) ||
             "Docker command gagal."
           }`,
         ),
