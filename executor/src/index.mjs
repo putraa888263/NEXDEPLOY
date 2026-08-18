@@ -1061,36 +1061,52 @@ async function prepareLaravelEnvironment(
     "utf8",
   );
 
-  // Jangan pernah bake .env ke Docker image.
-  let dockerignore = "";
+  
 
-  try {
-    dockerignore =
-      await readFile(
-        dockerignorePath,
-        "utf8",
-      );
-  } catch {
-    dockerignore =
-      "";
-  }
+  // Jangan pernah bake file yang tidak diperlukan ke Docker image.
 
-  const normalized =
-    dockerignore.replace(
-      /\s+$/,
-      "",
+let dockerignore = "";
+
+try {
+  dockerignore =
+    await readFile(
+      dockerignorePath,
+      "utf8",
     );
+} catch {
+  dockerignore =
+    "";
+}
 
-  const nextDockerignore =
-    normalized.length
-      ? `${normalized}\n.env\n`
-      : ".env\n";
+const existingDockerignore =
+  dockerignore
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
-  await writeFile(
-    dockerignorePath,
-    nextDockerignore,
-    "utf8",
-  );
+const requiredDockerignore = [
+  ".env",
+  "node_modules",
+  ".git",
+  ".github",
+  "tests",
+  "storage/logs/*",
+  "npm-debug.log*",
+  "yarn-error.log*",
+];
+
+const nextDockerignore = [
+  ...new Set([
+    ...existingDockerignore,
+    ...requiredDockerignore,
+  ]),
+].join("\n") + "\n";
+
+await writeFile(
+  dockerignorePath,
+  nextDockerignore,
+  "utf8",
+);
 
   for (
     const dir of [
