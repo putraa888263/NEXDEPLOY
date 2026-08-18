@@ -2,12 +2,11 @@ FROM nexdeploy/laravel-runtime:php-8.4
 
 WORKDIR /var/www/html
 
-COPY . /var/www/html
+COPY --chown=nexdeploy:nexdeploy . /var/www/html
 
 USER root
 
 RUN mkdir -p storage bootstrap/cache \
-    && chown -R nexdeploy:nexdeploy /var/www/html \
     && chmod -R ug+rwX storage bootstrap/cache
 
 USER nexdeploy
