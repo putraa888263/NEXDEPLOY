@@ -149,3 +149,186 @@ export async function ensureProjectDatabase(projectId, config) {
 
   return metadata;
 }
+export function databaseBackupFileName(date = new Date()) {
+  if (
+    !(date instanceof Date) ||
+    Number.isNaN(date.getTime())
+  ) {
+    throw new Error("Tanggal backup database tidak valid.");
+  }
+
+  const timestamp = date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+
+  return `${timestamp}-pre-migrate.dump`;
+}
+
+export function expiredDatabaseBackupFiles(
+  fileNames,
+  retention = 10,
+) {
+  if (
+    !Number.isInteger(retention) ||
+    retention < 1
+  ) {
+    throw new Error("Retention backup database tidak valid.");
+  }
+
+  return fileNames
+    .filter((name) =>
+      /^\d{8}T\d{6}Z-pre-migrate\.dump$/.test(name),
+    )
+    .sort()
+    .reverse()
+    .slice(retention);
+}
+
+export async function backupProjectDatabase(
+  projectId,
+  metadata,
+  config,
+  options = {},
+) {
+  const {
+    projectsDir,
+    projectsVolume,
+    postgresHost,
+    postgresPort,
+    internalNetwork,
+  } = config;
+
+  validateProjectDatabaseMetadata(
+    projectId,
+    metadata,
+    config,
+  );
+
+  if (
+    typeof projectsVolume !== "string" ||
+    !projectsVolume
+  ) {
+    throw new Error(
+      "Projects volume untuk backup database tidak tersedia.",
+    );
+  }
+
+  if (
+    typeof internalNetwork !== "string" ||
+    !internalNetwork
+  ) {
+    throw new Error(
+      "Internal network untuk backup database tidak tersedia.",
+    );
+  }
+
+  const retention =
+    options.retention ?? 10;
+
+  const now =
+    options.now ?? new Date();
+
+  const runner =
+    options.runner ?? runOneShot;
+
+  const backupsDir =
+    path.join(
+      projectsDir,
+      projectId,
+      "backups",
+    );
+
+  const fileName =
+    databaseBackupFileName(now);
+
+  const backupPath =
+    path.join(
+      backupsDir,
+      fileName,
+    );
+
+  await fs.mkdir(
+    backupsDir,
+    {
+      recursive: true,
+    },
+  );
+
+  try {
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        PGHOST: postgresHost,
+        PGPORT: postgresPort,
+        PGDATABASE: metadata.database,
+        PGUSER: metadata.username,
+        PGPASSWORD: metadata.password,
+        NEXDEPLOY_BACKUP_PATH: backupPath,
+      },
+
+      volumes: [
+        `${projectsVolume}:${projectsDir}`,
+      ],
+
+      command: [
+        "sh",
+        "-c",
+        'set -eu; umask 077; mkdir -p "$(dirname "$NEXDEPLOY_BACKUP_PATH")"; pg_dump --format=custom --no-owner --no-acl --file="$NEXDEPLOY_BACKUP_PATH"',
+      ],
+    });
+  } catch {
+    throw new Error(
+      "Backup database PostgreSQL gagal.",
+    );
+  }
+
+  let backupStat;
+
+  try {
+    backupStat =
+      await fs.stat(backupPath);
+  } catch {
+    throw new Error(
+      "File backup database tidak ditemukan setelah pg_dump.",
+    );
+  }
+
+  if (
+    !backupStat.isFile() ||
+    backupStat.size < 1
+  ) {
+    throw new Error(
+      "File backup database kosong atau tidak valid.",
+    );
+  }
+
+  const files =
+    await fs.readdir(backupsDir);
+
+  const expired =
+    expiredDatabaseBackupFiles(
+      files,
+      retention,
+    );
+
+  for (const name of expired) {
+    await fs.rm(
+      path.join(
+        backupsDir,
+        name,
+      ),
+      {
+        force: true,
+      },
+    );
+  }
+
+  return {
+    fileName,
+    path: backupPath,
+    size: backupStat.size,
+  };
+}

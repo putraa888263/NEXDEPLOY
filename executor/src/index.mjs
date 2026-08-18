@@ -60,6 +60,7 @@ import {
 
 import {
   ensureProjectDatabase,
+  backupProjectDatabase,
 } from "./deployment/postgres.mjs";
 
 import {
@@ -803,6 +804,37 @@ async function deployLaravelRelease(
       throw new DeployStageError(
         "preparing",
         `Laravel package discovery gagal: ${summarizeFailure(error?.message)}`,
+      );
+    }
+
+    await log(
+      job,
+      "info",
+      "Membuat backup PostgreSQL sebelum migrasi.",
+    );
+
+    try {
+      const databaseBackup =
+        await backupProjectDatabase(
+          projectId,
+          dbMetadata,
+          dbConfig,
+          {
+            retention: 10,
+          },
+        );
+
+      await log(
+        job,
+        "success",
+        `Backup PostgreSQL selesai: ${databaseBackup.fileName}`,
+      );
+    } catch (error) {
+      throw new DeployStageError(
+        "preparing",
+        `Backup PostgreSQL gagal: ${summarizeFailure(
+          error?.message,
+        )}`,
       );
     }
 
