@@ -60,6 +60,9 @@ import {
 } from "./deployment/docker.mjs";
 
 import {
+  loadProjectEnvironment,
+} from "./deployment/environment.mjs";
+import {
   ensureProjectDatabase,
   backupProjectDatabase,
 } from "./deployment/postgres.mjs";
@@ -723,17 +726,47 @@ async function deployLaravelRelease(
     throw new DeployStageError("preparing", "PostgreSQL admin configuration missing.");
   }
 
-  const dbMetadata = await ensureProjectDatabase(projectId, dbConfig);
+  const dbMetadata =
+    await ensureProjectDatabase(
+      projectId,
+      dbConfig,
+    );
+
+  const userEnvironment =
+    await loadProjectEnvironment(
+      projectsDir,
+      projectId,
+    );
+
   const dbOverrides = {
-      DB_CONNECTION: "pgsql",
-      DB_HOST: dbMetadata.host,
-      DB_PORT: String(dbMetadata.port),
-      DB_DATABASE: dbMetadata.database,
-      DB_USERNAME: dbMetadata.username,
-      DB_PASSWORD: dbMetadata.password
+    DB_CONNECTION:
+      "pgsql",
+
+    DB_HOST:
+      dbMetadata.host,
+
+    DB_PORT:
+      String(
+        dbMetadata.port,
+      ),
+
+    DB_DATABASE:
+      dbMetadata.database,
+
+    DB_USERNAME:
+      dbMetadata.username,
+
+    DB_PASSWORD:
+      dbMetadata.password,
   };
 
-  await prepareLaravelEnvironment(release, dbOverrides);
+  await prepareLaravelEnvironment(
+    release,
+    {
+      ...userEnvironment,
+      ...dbOverrides,
+    },
+  );
 
   await log(
     job,

@@ -776,3 +776,63 @@ test(
     );
   },
 );
+test(
+  "NEXDEPLOY protected overrides win over user environment",
+  () => {
+    const userEnvironment = {
+      APP_URL:
+        "https://example.com",
+
+      MAIL_HOST:
+        "smtp.example.com",
+
+      DB_HOST:
+        "evil-host",
+    };
+
+    const protectedOverrides = {
+      DB_HOST:
+        "postgres",
+
+      DB_DATABASE:
+        "nxd_project",
+
+      DB_USERNAME:
+        "nxu_project",
+    };
+
+    const merged =
+      mergeEnvFile(
+        [
+          "APP_URL=http://localhost",
+          "MAIL_HOST=localhost",
+          "DB_HOST=localhost",
+          "",
+        ].join("\n"),
+        {
+          ...userEnvironment,
+          ...protectedOverrides,
+        },
+      );
+
+    assert.match(
+      merged,
+      /APP_URL=https:\/\/example\.com/,
+    );
+
+    assert.match(
+      merged,
+      /MAIL_HOST=smtp\.example\.com/,
+    );
+
+    assert.match(
+      merged,
+      /DB_HOST=postgres/,
+    );
+
+    assert.doesNotMatch(
+      merged,
+      /DB_HOST=evil-host/,
+    );
+  },
+);
