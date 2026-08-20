@@ -61,6 +61,7 @@ import {
 
 import {
   loadProjectEnvironment,
+  saveProjectEnvironment,
 } from "./deployment/environment.mjs";
 import {
   ensureProjectDatabase,
@@ -1668,6 +1669,49 @@ const server =
             );
           }
 
+          if (
+            payload.environment !== undefined
+          ) {
+            if (
+              !payload.environment ||
+              typeof payload.environment !== "object" ||
+              Array.isArray(
+                payload.environment,
+              )
+            ) {
+              return json(
+                response,
+                400,
+                {
+                  error:
+                    "Environment deployment tidak valid.",
+                },
+              );
+            }
+
+            try {
+              await saveProjectEnvironment(
+                projectsDir,
+                payload.projectId,
+                payload.environment,
+              );
+            } catch (error) {
+              return json(
+                response,
+                400,
+                {
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : "Environment deployment tidak dapat disimpan.",
+                },
+              );
+            }
+
+            console.log(
+              `PANEL_ENVIRONMENT_SAVED project=${payload.projectId} variables=${Object.keys(payload.environment).length}`,
+            );
+          }
           const job = {
             id:
               randomUUID(),
@@ -1677,8 +1721,12 @@ const server =
 
             status:
               "awaiting_archive",
+            payload: {
+              ...payload,
+              environment:
+                undefined,
+            },
 
-            payload,
 
             createdAt:
               new Date().toISOString(),

@@ -1,12 +1,11 @@
 "use client";
 
 import {
-  Activity,
+  KeyRound, Activity,
   Archive,
   Bell,
   Box,
   Check,
-  ChevronDown,
   ChevronLeft,
   CircleAlert,
   Clock3,
@@ -19,7 +18,6 @@ import {
   Gauge,
   Globe2,
   HardDrive,
-  KeyRound,
   LogIn,
   LogOut,
   LayoutDashboard,
@@ -38,7 +36,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { KeyRound, FormEvent, useEffect, useMemo, useState , useCallback} from "react";
 
 type View = "dashboard" | "projects" | "activity" | "backups" | "settings";
 type ProjectStatus = "Healthy" | "Deploying" | "Stopped";
@@ -89,15 +87,6 @@ type ArchiveValidation = { detectedFramework: string; files: number; readiness: 
 
 const defaultSettings: AppSettings = { serverName: "VPS Utama", serverIp: "103.127.96.42", location: "Jakarta", projectDirectory: "/opt/nexdeploy/projects", baseDomain: "apps.adecloud.id", npmUrl: "http://103.127.96.42:81", sslEmail: "admin@adecloud.id", defaultDatabase: "MariaDB", databaseVersion: "11.4", backupRetention: 7 };
 
-const logLines = [
-  ["14:32:08", "Mengunggah arsip aplikasi", "done"],
-  ["14:32:12", "Laravel 11 terdeteksi", "done"],
-  ["14:32:13", "Menyiapkan container aplikasi", "done"],
-  ["14:32:41", "Menginstal dependency Composer", "done"],
-  ["14:33:02", "Menjalankan migrasi database", "done"],
-  ["14:33:07", "Menghubungkan domain dan SSL", "done"],
-  ["14:33:11", "Pemeriksaan kesehatan berhasil", "success"],
-];
 
 const navItems = [
   { id: "dashboard" as View, label: "Ringkasan", icon: LayoutDashboard },
@@ -188,8 +177,7 @@ export default function Home() {
 
   async function createProject(draft: ProjectDraft) {
     const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
-    const result = await response.json();
-    if (!response.ok) return notify(result.error || "Project gagal dibuat");
+    await response.json(); if (!response.ok) return notify(result.error || "Project gagal dibuat");
     const upload = new FormData();
     const selectedFile = draft.file;
     if (!selectedFile) return notify("Project dibuat, tetapi ZIP belum dipilih.");
@@ -244,8 +232,7 @@ export default function Home() {
   }
   async function deployProject(project: Project) {
     const response = await fetch(`/api/projects/${project.id}/deployments`, { method: "POST" });
-    const result = await response.json();
-    if (!response.ok) return notify(result.error || "Deployment gagal diantrikan.");
+    await response.json(); if (!response.ok) return notify(result.error || "Deployment gagal diantrikan.");
     await loadPanel();
     setSelected((current) => current?.id === project.id ? { ...current, status: "Stopped" } : current);
     notify("Deployment diproses. Buka tab Deployment atau Log untuk melihat hasilnya.");
@@ -253,8 +240,7 @@ export default function Home() {
 
   async function login(email: string, password: string) {
     const response = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
-    const result = await response.json();
-    if (!response.ok) return result.error || "Login gagal.";
+    await response.json(); if (!response.ok) return result.error || "Login gagal.";
     setRole(result.user.role as Role);
     setSignedInUser(result.user as SignedInUser);
     await loadPanel();
@@ -268,8 +254,7 @@ export default function Home() {
   }
   async function changePassword(currentPassword: string, newPassword: string) {
     const response = await fetch("/api/account/password", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
-    const result = await response.json();
-    if (!response.ok) return result.error || "Password gagal diubah.";
+    await response.json(); if (!response.ok) return result.error || "Password gagal diubah.";
     setRole(null);
     setSignedInUser(null);
     setProjects([]);
@@ -397,7 +382,12 @@ function Dashboard({ projects, openProject, goProjects }: { projects: Project[];
 function ProjectsView({ projects, query, setQuery, filter, setFilter, openProject, openModal, canOperate }: { projects: Project[]; query: string; setQuery: (v: string) => void; filter: string; setFilter: (v: string) => void; openProject: (p: Project) => void; openModal: () => void; canOperate: boolean }) {
   return <div className="panel projects-page">
     <div className="project-toolbar"><label className="search-box"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama atau domain..." /></label><div className="filters">{["Semua", "Berjalan", "Deploying", "Berhenti"].map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div></div>
-    {projects.length ? <div className="project-cards">{projects.map((project) => <article key={project.id} className="project-card" onClick={() => openProject(project)}><div className="card-top"><ProjectMark project={project} /><StatusPill status={project.status} /></div><h3>{project.name}</h3><p>{project.domain}</p><div className="card-details"><span><Box size={16} />{project.framework}</span><span><Database size={16} />{project.database || "MariaDB"}</span></div><div className="resource-line"><span>CPU <b>{project.cpu}%</b></span><span>Memory <b>{project.memory}%</b></span></div><div className="dual-meter"><i style={{width: `${project.cpu}%`}} /><i style={{width: `${project.memory}%`}} /></div><footer><span><Clock3 size={14} />{relativeTime(project.updatedAt)}</span><button aria-label={`Buka ${project.name}`}><ExternalLink size={16} /></button></footer></article>)}</div> : <div className="empty-state"><Search size={26} /><h3>Project tidak ditemukan</h3><p>Coba kata pencarian atau status yang berbeda.</p>{canOperate && <button className="secondary-btn" onClick={openModal}>Buat project baru</button>}</div>}
+    {projects.length ? <div className="project-cards">{projects.map((project) => <button
+  type="button"
+  key={project.id}
+  className="project-card"
+  onClick={() => openProject(project)}
+><div className="card-top"><ProjectMark project={project} /><StatusPill status={project.status} /></div><h3>{project.name}</h3><p>{project.domain}</p><div className="card-details"><span><Box size={16} />{project.framework}</span><span><Database size={16} />{project.database || "MariaDB"}</span></div><div className="resource-line"><span>CPU <b>{project.cpu}%</b></span><span>Memory <b>{project.memory}%</b></span></div><div className="dual-meter"><i style={{width: `${project.cpu}%`}} /><i style={{width: `${project.memory}%`}} /></div><footer><span><Clock3 size={14} />{relativeTime(project.updatedAt)}</span><span className="project-card-open-icon" aria-hidden="true"><ExternalLink size={16} /></span></footer></button>)}</div> : <div className="empty-state"><Search size={26} /><h3>Project tidak ditemukan</h3><p>Coba kata pencarian atau status yang berbeda.</p>{canOperate && <button className="secondary-btn" onClick={openModal}>Buat project baru</button>}</div>}
   </div>;
 }
 
@@ -443,14 +433,14 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
 function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; refreshProjects: () => void }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     const data = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json());
     setDeployments(data.deployments ?? []);
     return data.deployments ?? [];
-  };
+  }, [projectId]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    const interval: NodeJS.Timeout;
     const poll = async () => {
       const deps = await refresh();
       const latest = deps[0];
@@ -464,9 +454,9 @@ function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; ref
     interval = setInterval(poll, 3000);
     return () => clearInterval(interval);
 
-  }, [projectId, refreshProjects]);
+  }, [refresh, refreshProjects]);
 
-  const retry = async (deployment: Deployment) => { const response = await fetch(`/api/deployments/${deployment.id}/retry`, { method: "POST" }); const result = await response.json(); if (!response.ok) return; await refresh(); };
+  const retry = async (deployment: Deployment) => { const response = await fetch(`/api/deployments/${deployment.id}/retry`, { method: "POST" }); await response.json(); if (!response.ok) return; await refresh(); };
   const rollback = async () => { const response = await fetch(`/api/projects/${projectId}/rollback`, { method: "POST" }); if (response.ok) await refresh(); };
   const duration = (deployment: Deployment) => deployment.startedAt && deployment.finishedAt ? `${Math.max(0, Math.round((new Date(deployment.finishedAt).getTime() - new Date(deployment.startedAt).getTime()) / 1000))} detik` : "-";
   return <section className="panel table-panel"><div className="panel-head"><div><h2>Riwayat deployment</h2><p>Antrean, detail error, dan permintaan rollback.</p></div><button className="secondary-btn" onClick={() => void rollback()}><RotateCcw size={16} />Rollback</button></div><div className="data-table"><div className="table-row head"><span>Arsip</span><span>Status</span><span>Durasi</span><span>Waktu</span><span /></div>{deployments.length ? deployments.map((deployment) => <div className="table-row" key={deployment.id}><span><strong>{deployment.archiveName}</strong><small className="deployment-action">{deployment.action ?? "Deploy"} · {deployment.executor}</small>{deployment.error && <small className="deployment-error">{deployment.error}</small>}</span><span className={deployment.status === "WaitingExecutor" ? "status status-deploying" : deployment.status === "Failed" ? "status status-stopped" : "success-label"}>{deployment.status === "WaitingExecutor" ? "Menunggu executor" : deployment.status}</span><span>{duration(deployment)}</span><span>{relativeTime(deployment.createdAt)}</span>{["WaitingExecutor", "Failed"].includes(deployment.status) ? <button className="restore-btn" onClick={() => void retry(deployment)}><RefreshCw size={15} />Coba ulang</button> : <span />}</div>) : <div className="empty-state"><FileArchive size={26} /><h3>Belum ada deployment</h3><p>Unggah ZIP lalu pilih Deploy ulang.</p></div>}</div></section>;
@@ -477,24 +467,17 @@ function EnvironmentTab({ project, notify, canOperate }: { project: Project; not
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => { void fetch(`/api/projects/${project.id}/environment`).then((response) => response.json()).then((data) => { if (data.environment) setEntries(data.environment); else setError(data.error || "Environment gagal dimuat."); }).catch(() => setError("Environment gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
+useEffect(() => { void fetch(`/api/projects/${project.id}/environment`).then((response) => response.json()).then((data) => { if (data.environment) setEntries(data.environment); else setError(data.error || "Environment gagal dimuat."); }).catch(() => setError("Environment gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
   const update = (index: number, changes: Partial<EnvironmentVariable>) => setEntries((items) => items.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry));
-  const generateAppKey = async () => {
-    const key = `base64:${btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))}`;
-    const index = entries.findIndex((entry) => entry.key === "APP_KEY");
-    if (index >= 0) update(index, { value: key, isSecret: true }); else setEntries((items) => [...items, { key: "APP_KEY", value: key, isSecret: true }]);
-    notify("APP_KEY baru dibuat. Simpan environment untuk menggunakannya.");
-  };
   const save = async () => {
     setSaving(true); setError("");
     const response = await fetch(`/api/projects/${project.id}/environment`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ environment: entries }) });
-    const result = await response.json();
-    setSaving(false);
+    await response.json(); setSaving(false);
     if (!response.ok) return setError(result.error || "Environment gagal disimpan.");
     setEntries((items) => items.map((entry) => ({ ...entry, value: entry.isSecret ? "" : entry.value, saved: true })));
     notify("Environment berhasil disimpan.");
   };
-  return <section className="panel form-panel"><div className="panel-head"><div><h2>Environment variables</h2><p>Nilai sensitif disamarkan setelah disimpan dan siap untuk worker deployment.</p></div>{canOperate && <div className="environment-actions"><button className="secondary-btn" onClick={() => void generateAppKey()}><KeyRound size={16} />Buat APP_KEY</button><button className="primary-btn" disabled={saving || loading} onClick={() => void save()}><Check size={17} />{saving ? "Menyimpan..." : "Simpan"}</button></div>}</div>{error && <p className="login-error environment-error">{error}</p>}<div className="env-list">{loading ? <p className="user-empty">Memuat environment...</p> : entries.map((entry, index) => <div key={`${entry.key}-${index}`}><input value={entry.key} disabled={!canOperate} onChange={(event) => update(index, { key: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} aria-label="Nama variable" /><input type={entry.isSecret ? "password" : "text"} value={entry.value} disabled={!canOperate} placeholder={entry.isSecret && entry.saved ? "Tersimpan - isi untuk mengganti" : "Nilai"} onChange={(event) => update(index, { value: event.target.value })} aria-label={`Nilai ${entry.key}`} /><button className={`secret-toggle ${entry.isSecret ? "active" : ""}`} disabled={!canOperate} title="Tandai sebagai nilai rahasia" onClick={() => update(index, { isSecret: !entry.isSecret })}><ShieldCheck size={15} /></button><button className="icon-btn subtle" disabled={!canOperate} title="Hapus" onClick={() => setEntries((items) => items.filter((_, entryIndex) => entryIndex !== index))}><X size={16} /></button></div>)}</div>{canOperate && <button className="add-variable" onClick={() => setEntries((items) => [...items, { key: "", value: "", isSecret: false }])}><Plus size={16} />Tambah variable</button>}</section>;
+  return <section className="panel form-panel"><div className="panel-head"><div><h2>Environment variables</h2><p>Environment aplikasi dikelola dari sini. APP_KEY dan kredensial database dikelola otomatis oleh NEXDEPLOY.</p></div>{canOperate && <div className="environment-actions"><button className="primary-btn" disabled={saving || loading} onClick={() => void save()}><Check size={17} />{saving ? "Menyimpan..." : "Simpan"}</button></div>}</div>{error && <p className="login-error environment-error">{error}</p>}<div className="env-list">{loading ? <p className="user-empty">Memuat environment...</p> : entries.map((entry, index) => <div key={`${entry.key}-${index}`}><input value={entry.key} disabled={!canOperate} onChange={(event) => update(index, { key: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} aria-label="Nama variable" /><input type={entry.isSecret ? "password" : "text"} value={entry.value} disabled={!canOperate} placeholder={entry.isSecret && entry.saved ? "Tersimpan - isi untuk mengganti" : "Nilai"} onChange={(event) => update(index, { value: event.target.value })} aria-label={`Nilai ${entry.key}`} /><button className={`secret-toggle ${entry.isSecret ? "active" : ""}`} disabled={!canOperate} title="Tandai sebagai nilai rahasia" onClick={() => update(index, { isSecret: !entry.isSecret })}><ShieldCheck size={15} /></button><button className="icon-btn subtle" disabled={!canOperate} title="Hapus" onClick={() => setEntries((items) => items.filter((_, entryIndex) => entryIndex !== index))}><X size={16} /></button></div>)}</div>{canOperate && <button className="add-variable" onClick={() => setEntries((items) => [...items, { key: "", value: "", isSecret: false }])}><Plus size={16} />Tambah variable</button>}</section>;
 }
 
 function ResourcesTab({ project, notify, canOperate }: { project: Project; notify: (message: string) => void; canOperate: boolean }) {
@@ -502,9 +485,9 @@ function ResourcesTab({ project, notify, canOperate }: { project: Project; notif
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => { void fetch(`/api/projects/${project.id}/resources`).then((response) => response.json()).then((data) => { if (data.resources) setResources(data.resources); else setError(data.error || "Resource gagal dimuat."); }).catch(() => setError("Resource gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
+useEffect(() => { void fetch(`/api/projects/${project.id}/resources`).then((response) => response.json()).then((data) => { if (data.resources) setResources(data.resources); else setError(data.error || "Resource gagal dimuat."); }).catch(() => setError("Resource gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
   const update = (key: keyof ProjectResources, value: string | number) => setResources((current) => ({ ...current, [key]: value }));
-  const save = async () => { setSaving(true); setError(""); const response = await fetch(`/api/projects/${project.id}/resources`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(resources) }); const result = await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Resource gagal disimpan."); setResources(result.resources); notify("Konfigurasi resource berhasil disimpan."); };
+  const save = async () => { setSaving(true); setError(""); const response = await fetch(`/api/projects/${project.id}/resources`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(resources) }); await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Resource gagal disimpan."); setResources(result.resources); notify("Konfigurasi resource berhasil disimpan."); };
   return <section className="panel form-panel"><div className="panel-head"><div><h2>Resource container</h2><p>Batas ini akan diterapkan executor Docker saat project dideploy ke VPS.</p></div>{canOperate && <button className="primary-btn" disabled={saving || loading} onClick={() => void save()}><Check size={17} />{saving ? "Menyimpan..." : "Simpan"}</button>}</div>{error && <p className="login-error environment-error">{error}</p>}{loading ? <p className="user-empty">Memuat konfigurasi resource...</p> : <div className="resource-form"><label><span>Versi PHP</span><select disabled={!canOperate} value={resources.phpVersion} onChange={(event) => update("phpVersion", event.target.value)}>{["8.1", "8.2", "8.3", "8.4"].map((version) => <option key={version}>{version}</option>)}</select></label><label><span>CPU limit (vCPU)</span><input disabled={!canOperate} type="number" min="1" max="16" value={resources.cpuLimit} onChange={(event) => update("cpuLimit", Number(event.target.value))} /></label><label><span>Memory limit (MB)</span><input disabled={!canOperate} type="number" min="128" max="32768" step="128" value={resources.memoryLimit} onChange={(event) => update("memoryLimit", Number(event.target.value))} /></label><label><span>Disk quota (GB)</span><input disabled={!canOperate} type="number" min="1" max="1000" value={resources.diskQuota} onChange={(event) => update("diskQuota", Number(event.target.value))} /></label><label><span>Port internal</span><input disabled={!canOperate} type="number" min="1024" max="65535" value={resources.internalPort} onChange={(event) => update("internalPort", Number(event.target.value))} /></label><div className="resource-executor"><Server size={19} /><div><strong>Rencana executor</strong><span>PHP {resources.phpVersion} · {resources.cpuLimit} vCPU · {resources.memoryLimit} MB · {resources.diskQuota} GB · port {resources.internalPort}</span></div></div></div>}</section>;
 }
 
@@ -529,10 +512,10 @@ function ActivityView() {
 function BackupsView({ compact = false, project, notify, canOperate = false }: { compact?: boolean; project?: Project; notify: (m: string) => void; canOperate?: boolean }) {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(Boolean(project));
-  const loadBackups = async () => { if (!project) return; const response = await fetch(`/api/projects/${project.id}/backups`); const result = await response.json(); if (response.ok) setBackups(result.backups ?? []); setLoading(false); };
-  useEffect(() => { void loadBackups(); }, [project?.id]);
-  const createBackup = async () => { if (!project) return notify("Pilih project untuk membuat backup."); const response = await fetch(`/api/projects/${project.id}/backups`, { method: "POST" }); const result = await response.json(); if (!response.ok) return notify(result.error || "Backup gagal diantrikan."); setBackups((items) => [result.backup, ...items]); notify("Backup diantrikan dan menunggu executor VPS."); };
-  const restoreBackup = async (backup: Backup) => { if (!confirm(`Pulihkan ${backup.name}? Tidak ada data yang diubah sebelum executor VPS tersedia.`)) return; const response = await fetch(`/api/backups/${backup.id}/restore`, { method: "POST" }); const result = await response.json(); if (!response.ok) return notify(result.error || "Restore gagal diantrikan."); notify("Restore diantrikan dan menunggu executor VPS."); };
+  const loadBackups = useCallback(async () => { if (!project) return; const response = await fetch(`/api/projects/${project.id}/backups`); await response.json(); if (response.ok) setBackups(result.backups ?? []); setLoading(false); }, [project]);
+  useEffect(() => { void loadBackups(); }, [loadBackups]);
+  const createBackup = async () => { if (!project) return notify("Pilih project untuk membuat backup."); const response = await fetch(`/api/projects/${project.id}/backups`, { method: "POST" }); await response.json(); if (!response.ok) return notify(result.error || "Backup gagal diantrikan."); setBackups((items) => [result.backup, ...items]); notify("Backup diantrikan dan menunggu executor VPS."); };
+  const restoreBackup = async (backup: Backup) => { if (!confirm(`Pulihkan ${backup.name}? Tidak ada data yang diubah sebelum executor VPS tersedia.`)) return; const response = await fetch(`/api/backups/${backup.id}/restore`, { method: "POST" }); await response.json(); if (!response.ok) return notify(result.error || "Restore gagal diantrikan."); notify("Restore diantrikan dan menunggu executor VPS."); };
   if (!project) return <section className="panel backup-page"><div className="panel-head"><div><h2>Backup terbaru</h2><p>Pilih project untuk melihat atau membuat backup.</p></div></div><div className="empty-state"><Archive size={28} /><h3>Backup per project</h3><p>Buka detail project, lalu pilih tab Backup.</p></div></section>;
   return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>Backup {project.name}</h2><p>Retensi mengikuti pengaturan panel. Executor akan membuat file aplikasi dan database.</p></div>{canOperate && <button className="primary-btn" onClick={() => void createBackup()}><Plus size={17} />Buat backup</button>}</div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Jenis</span><span>Status</span><span>Dibuat</span><span /></div>{loading ? <div className="empty-state"><p>Memuat backup...</p></div> : backups.length ? backups.map((backup) => <div className="table-row" key={backup.id}><span className="backup-name"><Archive size={17} /><strong>{backup.name}</strong></span><span>{backup.type}</span><span className="status status-deploying">Menunggu executor</span><span>{relativeTime(backup.createdAt)}</span>{canOperate ? <button className="restore-btn" onClick={() => void restoreBackup(backup)}><RotateCcw size={15} />Pulihkan</button> : <span />}</div>) : <div className="empty-state"><Archive size={26} /><h3>Belum ada backup</h3><p>Buat backup untuk menyiapkan pemulihan saat executor VPS tersedia.</p></div>}</div></section>;
 }
@@ -572,14 +555,13 @@ function UserManagement({ notify }: { notify: (message: string) => void }) {
   const [users, setUsers] = useState<PanelUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "Operator" as Role });
+const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "Operator" as Role });
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState("");
 
   const loadUsers = async () => {
     const response = await fetch("/api/users");
-    const result = await response.json();
-    if (!response.ok) { setError(result.error || "Daftar pengguna gagal dimuat."); return; }
+    await response.json(); if (!response.ok) { setError(result.error || "Daftar pengguna gagal dimuat."); return; }
     setUsers(result.users);
   };
 
@@ -588,8 +570,7 @@ function UserManagement({ notify }: { notify: (message: string) => void }) {
   const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const response = await fetch("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
-    const result = await response.json();
-    if (!response.ok) return setError(result.error || "Akun gagal dibuat.");
+    await response.json(); if (!response.ok) return setError(result.error || "Akun gagal dibuat.");
     setUsers((items) => [...items, result.user]);
     setDraft({ name: "", email: "", password: "", role: "Operator" });
     setError("");
@@ -598,8 +579,7 @@ function UserManagement({ notify }: { notify: (message: string) => void }) {
 
   const updateUser = async (user: PanelUser, changes: Partial<Pick<PanelUser, "role" | "status">>) => {
     const response = await fetch(`/api/users/${user.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(changes) });
-    const result = await response.json();
-    if (!response.ok) return setError(result.error || "Akun gagal diperbarui.");
+    await response.json(); if (!response.ok) return setError(result.error || "Akun gagal diperbarui.");
     setUsers((items) => items.map((item) => item.id === user.id ? { ...item, ...result.user } : item));
     setError("");
     notify(`Akses ${user.email} diperbarui`);
@@ -607,8 +587,7 @@ function UserManagement({ notify }: { notify: (message: string) => void }) {
 
   const resetPassword = async (user: PanelUser) => {
     const response = await fetch(`/api/users/${user.id}/reset-password`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: temporaryPassword }) });
-    const result = await response.json();
-    if (!response.ok) return setError(result.error || "Password gagal direset.");
+    await response.json(); if (!response.ok) return setError(result.error || "Password gagal direset.");
     setTemporaryPassword("");
     setResetUserId(null);
     setError("");
@@ -625,22 +604,22 @@ function CreateProjectModal({ onClose, onSubmit, baseDomain, defaultDatabase }: 
   const next = () => { if (draft.name.trim()) setStep(2); };
   const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!draft.fileName) return; onSubmit(draft); };
   return <div className="modal-wrap" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-backdrop" onClick={onClose} aria-label="Tutup dialog" /><div className="modal"><div className="modal-head"><div><span>LANGKAH {step} DARI 2</span><h2 id="modal-title">{step === 1 ? "Buat project baru" : "Unggah aplikasi"}</h2><p>{step === 1 ? "Kami siapkan domain dan database secara otomatis." : `Project ${draft.name} siap menerima file aplikasi.`}</p></div><button className="icon-btn" onClick={onClose}><X size={20} /></button></div><div className="step-line"><i className="done" /><i className={step === 2 ? "done" : ""} /></div><form onSubmit={submit}>
-    {step === 1 ? <div className="modal-fields"><label><span>Nama project</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Contoh: makanan-mama" autoFocus /></label><label><span>Framework</span><select value={draft.framework} onChange={(e) => setDraft({ ...draft, framework: e.target.value })}><option>Laravel</option><option>PHP Native</option></select></label><label><span>Database</span><select value={draft.database} onChange={(e) => setDraft({ ...draft, database: e.target.value as DatabaseType })}><option>MariaDB</option><option>PostgreSQL</option><option>Tanpa database</option></select></label><div className="domain-preview"><Globe2 size={18} /><div><span>Domain otomatis</span><strong>{slug}.{baseDomain}</strong></div></div></div> : <label className={`upload-zone ${draft.fileName ? "has-file" : ""}`}><CloudUpload size={28} /><h3>{draft.fileName || "Pilih file ZIP aplikasi"}</h3><p>{draft.fileName ? "File siap digunakan dan akan diperiksa sebelum diproses." : "Klik area ini untuk memilih file dari perangkat"}</p><span className="secondary-btn">{draft.fileName ? "Ganti file" : "Pilih file ZIP"}</span><input id="project-archive" type="file" accept=".zip,application/zip" onChange={(e) => { const file = e.target.files?.[0]; setDraft({ ...draft, fileName: file?.name || "", file }); }} /><small>Maksimal 100 MB di panel lokal · format .zip</small></label>}
+    {step === 1 ? <div className="modal-fields"><label><span>Nama project</span><input required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Contoh: makanan-mama" /></label><label><span>Framework</span><select value={draft.framework} onChange={(e) => setDraft({ ...draft, framework: e.target.value })}><option>Laravel</option><option>PHP Native</option></select></label><label><span>Database</span><select value={draft.database} onChange={(e) => setDraft({ ...draft, database: e.target.value as DatabaseType })}><option>MariaDB</option><option>PostgreSQL</option><option>Tanpa database</option></select></label><div className="domain-preview"><Globe2 size={18} /><div><span>Domain otomatis</span><strong>{slug}.{baseDomain}</strong></div></div></div> : <label className={`upload-zone ${draft.fileName ? "has-file" : ""}`}><CloudUpload size={28} /><h3>{draft.fileName || "Pilih file ZIP aplikasi"}</h3><p>{draft.fileName ? "File siap digunakan dan akan diperiksa sebelum diproses." : "Klik area ini untuk memilih file dari perangkat"}</p><span className="secondary-btn">{draft.fileName ? "Ganti file" : "Pilih file ZIP"}</span><input id="project-archive" type="file" accept=".zip,application/zip" onChange={(e) => { const file = e.target.files?.[0]; setDraft({ ...draft, fileName: file?.name || "", file }); }} /><small>Maksimal 100 MB di panel lokal · format .zip</small></label>}
     <footer className="modal-footer">{step === 2 && <button type="button" className="text-btn" onClick={() => setStep(1)}><ChevronLeft size={16} />Kembali</button>}<span /><button type={step === 1 ? "button" : "submit"} disabled={step === 1 ? !draft.name.trim() : !draft.fileName} className="primary-btn" onClick={step === 1 ? next : undefined}>{step === 1 ? "Lanjutkan" : "Mulai deploy"}{step === 1 && <ChevronLeft size={16} className="rotate" />}</button></footer>
   </form></div></div>;
 }
 
 function InitialSetup({ onComplete }: { onComplete: () => void }) {
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [confirmation, setConfirmation] = useState(""); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (password !== confirmation) return setError("Konfirmasi password belum sama."); setSaving(true); setError(""); const response = await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, password }) }); const result = await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Instalasi awal gagal."); onComplete(); };
-  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">INSTALASI AWAL</span><h1>Siapkan akses panel pertama.</h1><p>Buat akun Administrator untuk mengamankan workspace deployment Anda.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Pendaftaran sekali saja</strong><small>Setelah selesai, pengguna baru dikelola dari panel</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">ADMINISTRATOR</span><h2>Buat akun utama</h2><p>Gunakan email aktif dan password kuat untuk akses pertama.</p></div><label><span>Nama</span><input required value={name} onChange={(event) => setName(event.target.value)} autoFocus /></label><label><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Password</span><input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password</span><input required type="password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={saving}>{<ShieldCheck size={18} />}{saving ? "Menyiapkan akun..." : "Selesaikan instalasi"}</button></form></section></main>;
+  const submit = async (event: FormEvent) => { event.preventDefault(); if (password !== confirmation) return setError("Konfirmasi password belum sama."); setSaving(true); setError(""); const response = await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, password }) }); await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Instalasi awal gagal."); onComplete(); };
+  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">INSTALASI AWAL</span><h1>Siapkan akses panel pertama.</h1><p>Buat akun Administrator untuk mengamankan workspace deployment Anda.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Pendaftaran sekali saja</strong><small>Setelah selesai, pengguna baru dikelola dari panel</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">ADMINISTRATOR</span><h2>Buat akun utama</h2><p>Gunakan email aktif dan password kuat untuk akses pertama.</p></div><label><span>Nama</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Password</span><input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password</span><input required type="password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={saving}>{<ShieldCheck size={18} />}{saving ? "Menyiapkan akun..." : "Selesaikan instalasi"}</button></form></section></main>;
 }
 
 function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<string | null> }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+const [submitting, setSubmitting] = useState(false);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 6) { setError("Masukkan email dan password minimal 6 karakter."); return; } setSubmitting(true); setError(""); const message = await onLogin(email, password); if (message) setError(message); setSubmitting(false); };
   return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Gunakan akun panel untuk mengakses fitur sesuai peran yang sudah ditetapkan.</p></div><label><span>Email</span><input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label><label><span>Password</span><input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={submitting}>{<LogIn size={18} />}{submitting ? "Memeriksa akun..." : "Masuk ke panel"}</button></form></section></main>;
 }

@@ -279,10 +279,46 @@ export async function processDeployment(deploymentId: string, project: ProjectFo
     return;
   }
   try {
+    const environmentRows =
+      await db
+        .prepare(
+          "SELECT key, value_encrypted AS valueEncrypted FROM project_environment WHERE project_id = ? ORDER BY key",
+        )
+        .bind(project.id)
+        .all<{
+          key: string;
+          valueEncrypted: string;
+        }>();
+
+    const deploymentEnvironment =
+      Object.fromEntries(
+        await Promise.all(
+          (environmentRows.results ?? []).map(
+            async (entry) => [
+              entry.key,
+              await decryptEnvironmentValue(
+                entry.valueEncrypted,
+              ),
+            ],
+          ),
+        ),
+      );
+
     const response = await fetch(`${executor.url}/jobs/deploy`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${await decryptEnvironmentValue(executor.token_encrypted)}` },
-      body: JSON.stringify({ projectId: project.id, projectName: project.name, archiveName: project.archive_name, framework: project.framework }),
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${await decryptEnvironmentValue(
+          executor.token_encrypted,
+        )}`,
+      },
+      body: JSON.stringify({
+        projectId: project.id,
+        projectName: project.name,
+        archiveName: project.archive_name,
+        framework: project.framework,
+        environment: deploymentEnvironment,
+      }),
     });
     const result = await response.json().catch(() => ({})) as { job?: { id?: string }; error?: string };
     if (!response.ok || !result.job?.id) throw new Error(result.error || "Executor menolak job deployment.");
