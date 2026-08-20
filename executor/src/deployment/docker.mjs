@@ -14,27 +14,27 @@ function runDocker(args, { allowExitCodes = [0] } = {}) {
     let stderrOverflow = false;
 
     child.stdout.on("data", (chunk) => {
-      if (stdout.length < MAX_OUTPUT_BYTES) {
-        stdout += chunk;
+      stdout += chunk;
 
-        if (stdout.length > MAX_OUTPUT_BYTES) {
-          stdout = stdout.slice(0, MAX_OUTPUT_BYTES);
-          stdoutOverflow = true;
-        }
-      } else {
+      if (stdout.length > MAX_OUTPUT_BYTES) {
+        stdout =
+          stdout.slice(
+            -MAX_OUTPUT_BYTES,
+          );
+
         stdoutOverflow = true;
       }
     });
 
     child.stderr.on("data", (chunk) => {
-      if (stderr.length < MAX_OUTPUT_BYTES) {
-        stderr += chunk;
+      stderr += chunk;
 
-        if (stderr.length > MAX_OUTPUT_BYTES) {
-          stderr = stderr.slice(0, MAX_OUTPUT_BYTES);
-          stderrOverflow = true;
-        }
-      } else {
+      if (stderr.length > MAX_OUTPUT_BYTES) {
+        stderr =
+          stderr.slice(
+            -MAX_OUTPUT_BYTES,
+          );
+
         stderrOverflow = true;
       }
     });
