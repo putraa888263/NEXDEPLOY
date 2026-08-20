@@ -13,6 +13,9 @@ import {
   databaseBackupFileName,
   expiredDatabaseBackupFiles,
   backupProjectDatabase,
+  validateDatabaseBackupFileName,
+  databaseRestoreSafetyBackupFileName,
+  restoreProjectDatabase,
 } from "./postgres.mjs";
 
 const uuid = "3c4767a7-80fe-4294-b756-6153d0aa3d1f";
@@ -360,4 +363,287 @@ test("backup retention rejects invalid value", () => {
       0,
     ),
   );
+});
+test("restore backup filename validation accepts safe dumps", () => {
+  assert.strictEqual(
+    validateDatabaseBackupFileName(
+      "20260819T111404Z-pre-migrate.dump",
+    ),
+    "20260819T111404Z-pre-migrate.dump",
+  );
+
+  assert.strictEqual(
+    validateDatabaseBackupFileName(
+      "20260819T120000Z-pre-restore.dump",
+    ),
+    "20260819T120000Z-pre-restore.dump",
+  );
+});
+
+test("restore backup filename validation rejects traversal", () => {
+  assert.throws(() =>
+    validateDatabaseBackupFileName(
+      "../secret.dump",
+    ),
+  );
+
+  assert.throws(() =>
+    validateDatabaseBackupFileName(
+      "evil.sql",
+    ),
+  );
+});
+
+test("restore safety backup filename is deterministic", () => {
+  assert.strictEqual(
+    databaseRestoreSafetyBackupFileName(
+      new Date(
+        "2026-08-19T12:00:00.000Z",
+      ),
+    ),
+    "20260819T120000Z-pre-restore.dump",
+  );
+});
+
+test("restore validates archive and creates safety backup before destructive steps", async () => {
+  const tmp = await mkdtemp(
+    path.join(
+      os.tmpdir(),
+      "nexdeploy-restore-test-",
+    ),
+  );
+
+  try {
+    const metadata =
+      validMetadata();
+
+    const backupsDir =
+      path.join(
+        tmp,
+        uuid,
+        "backups",
+      );
+
+    await import("node:fs/promises").then(
+      ({ mkdir }) =>
+        mkdir(
+          backupsDir,
+          {
+            recursive: true,
+          },
+        ),
+    );
+
+    const sourceName =
+      "20260819T111404Z-pre-migrate.dump";
+
+    await writeFile(
+      path.join(
+        backupsDir,
+        sourceName,
+      ),
+      Buffer.from(
+        "fake-source-dump",
+      ),
+    );
+
+    const calls = [];
+
+    const fakeRunner =
+      async (options) => {
+        calls.push(options);
+
+        if (
+          options.env
+            ?.NEXDEPLOY_BACKUP_PATH
+        ) {
+          await writeFile(
+            options.env
+              .NEXDEPLOY_BACKUP_PATH,
+            Buffer.from(
+              "fake-safety-dump",
+            ),
+          );
+        }
+
+        return "";
+      };
+
+    const result =
+      await restoreProjectDatabase(
+        uuid,
+        metadata,
+        sourceName,
+        {
+          projectsDir: tmp,
+
+          projectsVolume:
+            "nexdeploy_executor-projects",
+
+          postgresHost:
+            "postgres",
+
+          postgresPort:
+            "5432",
+
+          internalNetwork:
+            "nexdeploy_nexdeploy-internal",
+
+          adminDb:
+            "nexdeploy",
+
+          adminUser:
+            "nexdeploy_admin",
+
+          adminPass:
+            "A".repeat(40),
+        },
+        {
+          now: new Date(
+            "2026-08-19T12:00:00.000Z",
+          ),
+
+          runner:
+            fakeRunner,
+        },
+      );
+
+    assert.strictEqual(
+      result.restoredFrom,
+      sourceName,
+    );
+
+    assert.strictEqual(
+      result.safetyBackup,
+      "20260819T120000Z-pre-restore.dump",
+    );
+
+    assert.ok(
+      calls.length >= 6,
+    );
+
+    assert.ok(
+      calls[0].command
+        .join(" ")
+        .includes(
+          "pg_restore --list",
+        ),
+    );
+
+    assert.ok(
+      calls[1].command
+        .join(" ")
+        .includes(
+          "pg_dump",
+        ),
+    );
+
+    assert.ok(
+      calls.some(
+        (call) =>
+          call.command?.[0] ===
+          "dropdb",
+      ),
+    );
+
+    assert.ok(
+      calls.some(
+        (call) =>
+          call.command?.[0] ===
+          "createdb",
+      ),
+    );
+
+    const restoreCall =
+      calls.at(-1);
+
+    assert.ok(
+      restoreCall.command
+        .join(" ")
+        .includes(
+          "pg_restore",
+        ),
+    );
+
+    assert.ok(
+      !restoreCall.command
+        .join(" ")
+        .includes(
+          metadata.password,
+        ),
+    );
+  } finally {
+    await rm(
+      tmp,
+      {
+        recursive: true,
+        force: true,
+      },
+    );
+  }
+});
+
+test("restore rejects missing backup before destructive actions", async () => {
+  const tmp = await mkdtemp(
+    path.join(
+      os.tmpdir(),
+      "nexdeploy-restore-test-",
+    ),
+  );
+
+  try {
+    let runnerCalled = false;
+
+    await assert.rejects(
+      restoreProjectDatabase(
+        uuid,
+        validMetadata(),
+        "20260819T111404Z-pre-migrate.dump",
+        {
+          projectsDir: tmp,
+
+          projectsVolume:
+            "nexdeploy_executor-projects",
+
+          postgresHost:
+            "postgres",
+
+          postgresPort:
+            "5432",
+
+          internalNetwork:
+            "nexdeploy_nexdeploy-internal",
+
+          adminDb:
+            "nexdeploy",
+
+          adminUser:
+            "nexdeploy_admin",
+
+          adminPass:
+            "A".repeat(40),
+        },
+        {
+          runner:
+            async () => {
+              runnerCalled = true;
+              return "";
+            },
+        },
+      ),
+    );
+
+    assert.strictEqual(
+      runnerCalled,
+      false,
+    );
+  } finally {
+    await rm(
+      tmp,
+      {
+        recursive: true,
+        force: true,
+      },
+    );
+  }
 });

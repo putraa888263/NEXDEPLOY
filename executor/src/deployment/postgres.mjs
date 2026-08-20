@@ -332,3 +332,323 @@ export async function backupProjectDatabase(
     size: backupStat.size,
   };
 }
+export function validateDatabaseBackupFileName(fileName) {
+  if (
+    typeof fileName !== "string" ||
+    !/^\d{8}T\d{6}Z-(pre-migrate|pre-restore)\.dump$/.test(
+      fileName,
+    )
+  ) {
+    throw new Error(
+      "Nama file backup database tidak valid.",
+    );
+  }
+
+  return fileName;
+}
+
+export function databaseRestoreSafetyBackupFileName(
+  date = new Date(),
+) {
+  if (
+    !(date instanceof Date) ||
+    Number.isNaN(date.getTime())
+  ) {
+    throw new Error(
+      "Tanggal safety backup database tidak valid.",
+    );
+  }
+
+  const timestamp = date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+
+  return `${timestamp}-pre-restore.dump`;
+}
+
+export async function restoreProjectDatabase(
+  projectId,
+  metadata,
+  backupFileName,
+  config,
+  options = {},
+) {
+  const {
+    projectsDir,
+    projectsVolume,
+    postgresHost,
+    postgresPort,
+    internalNetwork,
+    adminDb,
+    adminUser,
+    adminPass,
+  } = config;
+
+  validateProjectDatabaseMetadata(
+    projectId,
+    metadata,
+    config,
+  );
+
+  validateDatabaseBackupFileName(
+    backupFileName,
+  );
+
+  if (
+    typeof projectsVolume !== "string" ||
+    !projectsVolume
+  ) {
+    throw new Error(
+      "Projects volume untuk restore database tidak tersedia.",
+    );
+  }
+
+  if (
+    !adminDb ||
+    !adminUser ||
+    !adminPass
+  ) {
+    throw new Error(
+      "PostgreSQL admin configuration untuk restore tidak tersedia.",
+    );
+  }
+
+  const runner =
+    options.runner ?? runOneShot;
+
+  const now =
+    options.now ?? new Date();
+
+  const backupsDir =
+    path.join(
+      projectsDir,
+      projectId,
+      "backups",
+    );
+
+  const sourcePath =
+    path.join(
+      backupsDir,
+      backupFileName,
+    );
+
+  let sourceStat;
+
+  try {
+    sourceStat =
+      await fs.stat(sourcePath);
+  } catch {
+    throw new Error(
+      "File backup database untuk restore tidak ditemukan.",
+    );
+  }
+
+  if (
+    !sourceStat.isFile() ||
+    sourceStat.size < 1
+  ) {
+    throw new Error(
+      "File backup database untuk restore kosong atau tidak valid.",
+    );
+  }
+
+  try {
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        NEXDEPLOY_RESTORE_SOURCE:
+          sourcePath,
+      },
+
+      volumes: [
+        `${projectsVolume}:${projectsDir}`,
+      ],
+
+      command: [
+        "sh",
+        "-c",
+        'set -eu; pg_restore --list "$NEXDEPLOY_RESTORE_SOURCE" >/dev/null',
+      ],
+    });
+  } catch {
+    throw new Error(
+      "Archive PostgreSQL tidak valid untuk restore.",
+    );
+  }
+
+  const safetyFileName =
+    databaseRestoreSafetyBackupFileName(
+      now,
+    );
+
+  const safetyPath =
+    path.join(
+      backupsDir,
+      safetyFileName,
+    );
+
+  try {
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        PGHOST: postgresHost,
+        PGPORT: postgresPort,
+        PGDATABASE: metadata.database,
+        PGUSER: metadata.username,
+        PGPASSWORD: metadata.password,
+        NEXDEPLOY_BACKUP_PATH:
+          safetyPath,
+      },
+
+      volumes: [
+        `${projectsVolume}:${projectsDir}`,
+      ],
+
+      command: [
+        "sh",
+        "-c",
+        'set -eu; umask 077; pg_dump --format=custom --no-owner --no-acl --file="$NEXDEPLOY_BACKUP_PATH"',
+      ],
+    });
+  } catch {
+    throw new Error(
+      "Safety backup sebelum restore gagal.",
+    );
+  }
+
+  let safetyStat;
+
+  try {
+    safetyStat =
+      await fs.stat(safetyPath);
+  } catch {
+    throw new Error(
+      "Safety backup sebelum restore tidak ditemukan.",
+    );
+  }
+
+  if (
+    !safetyStat.isFile() ||
+    safetyStat.size < 1
+  ) {
+    throw new Error(
+      "Safety backup sebelum restore kosong.",
+    );
+  }
+
+  const terminateSql =
+    `SELECT pg_terminate_backend(pid)
+     FROM pg_stat_activity
+     WHERE datname = '${metadata.database}'
+       AND pid <> pg_backend_pid();`;
+
+  try {
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        PGHOST: postgresHost,
+        PGPORT: postgresPort,
+        PGDATABASE: adminDb,
+        PGUSER: adminUser,
+        PGPASSWORD: adminPass,
+      },
+
+      command: [
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        terminateSql,
+      ],
+    });
+
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        PGHOST: postgresHost,
+        PGPORT: postgresPort,
+        PGDATABASE: adminDb,
+        PGUSER: adminUser,
+        PGPASSWORD: adminPass,
+      },
+
+      command: [
+        "dropdb",
+        "--if-exists",
+        metadata.database,
+      ],
+    });
+
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        PGHOST: postgresHost,
+        PGPORT: postgresPort,
+        PGDATABASE: adminDb,
+        PGUSER: adminUser,
+        PGPASSWORD: adminPass,
+      },
+
+      command: [
+        "createdb",
+        "--owner",
+        metadata.username,
+        metadata.database,
+      ],
+    });
+
+    await runner({
+      image: "postgres:17-alpine",
+      network: internalNetwork,
+
+      env: {
+        PGHOST: postgresHost,
+        PGPORT: postgresPort,
+        PGDATABASE: metadata.database,
+        PGUSER: metadata.username,
+        PGPASSWORD: metadata.password,
+        NEXDEPLOY_RESTORE_SOURCE:
+          sourcePath,
+      },
+
+      volumes: [
+        `${projectsVolume}:${projectsDir}`,
+      ],
+
+      command: [
+        "sh",
+        "-c",
+        'set -eu; pg_restore --exit-on-error --no-owner --no-acl --dbname="$PGDATABASE" "$NEXDEPLOY_RESTORE_SOURCE"',
+      ],
+    });
+  } catch {
+    throw new Error(
+      "Restore database PostgreSQL gagal setelah safety backup dibuat.",
+    );
+  }
+
+  return {
+    restoredFrom:
+      backupFileName,
+
+    safetyBackup:
+      safetyFileName,
+
+    database:
+      metadata.database,
+
+    username:
+      metadata.username,
+  };
+}
