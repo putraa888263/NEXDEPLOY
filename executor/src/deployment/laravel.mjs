@@ -216,6 +216,28 @@ export function buildEntrypointCommand() {
   ];
 }
 
+export function serializeEnvValue(value) {
+  const text =
+    String(value);
+
+  if (text === "") {
+    return '""';
+  }
+
+  if (
+    /^[A-Za-z0-9_./:@+-]+$/.test(
+      text,
+    )
+  ) {
+    return text;
+  }
+
+  return `"${text
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")}"`;
+}
 export function mergeEnvFile(
   existingContents,
   overrides,
@@ -262,7 +284,7 @@ export function mergeEnvFile(
           return line;
         }
 
-        return `${key}=${overrides[key]}`;
+        return `${key}=${serializeEnvValue(overrides[key])}`;
       },
     );
 
@@ -274,7 +296,7 @@ export function mergeEnvFile(
   ) {
     if (!seen.has(key)) {
       merged.push(
-        `${key}=${value}`,
+        `${key}=${serializeEnvValue(value)}`,
       );
     }
   }

@@ -28,6 +28,7 @@ import {
   frontendBuildCommand,
   isLaravelRelease,
   mergeEnvFile,
+  serializeEnvValue,
   resolveLaravelReleaseRoot,
   shouldRunComposer,
   shouldRunFrontendBuild,
@@ -833,6 +834,67 @@ test(
     assert.doesNotMatch(
       merged,
       /DB_HOST=evil-host/,
+    );
+  },
+);
+test(
+  "serializeEnvValue quotes whitespace safely",
+  () => {
+    assert.equal(
+      serializeEnvValue(
+        "NEXDEPLOY ENV E2E",
+      ),
+      '"NEXDEPLOY ENV E2E"',
+    );
+  },
+);
+
+test(
+  "serializeEnvValue leaves safe values unquoted",
+  () => {
+    assert.equal(
+      serializeEnvValue(
+        "smtp.example.com",
+      ),
+      "smtp.example.com",
+    );
+
+    assert.equal(
+      serializeEnvValue(
+        "https://example.com",
+      ),
+      "https://example.com",
+    );
+  },
+);
+
+test(
+  "serializeEnvValue escapes quotes and backslashes",
+  () => {
+    assert.equal(
+      serializeEnvValue(
+        'hello "world" \\ path',
+      ),
+      '"hello \\"world\\" \\\\ path"',
+    );
+  },
+);
+
+test(
+  "mergeEnvFile safely writes values containing spaces",
+  () => {
+    const merged =
+      mergeEnvFile(
+        "APP_NAME=Laravel\n",
+        {
+          APP_NAME:
+            "NEXDEPLOY ENV E2E",
+        },
+      );
+
+    assert.match(
+      merged,
+      /APP_NAME="NEXDEPLOY ENV E2E"/,
     );
   },
 );
