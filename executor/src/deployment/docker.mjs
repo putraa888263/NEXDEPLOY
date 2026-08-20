@@ -257,6 +257,85 @@ export function buildStartContainerArgs({
   return args;
 }
 
+export function buildStartBackgroundContainerArgs({
+  name,
+  image,
+  network,
+  additionalNetworks = [],
+  env = {},
+  envFile = null,
+  labels = [],
+  volumes = [],
+  command = [],
+}) {
+  assertName(name, "container");
+  assertName(network, "network");
+
+  const args = [
+    "run",
+    "-d",
+    "--name",
+    name,
+    "--network",
+    network,
+    "--restart",
+    "unless-stopped",
+  ];
+
+  for (const net of additionalNetworks) {
+    assertName(net, "network");
+    args.push(
+      "--network",
+      net,
+    );
+  }
+
+  args.push(
+    ...labels.flatMap((entry) => [
+      "--label",
+      entry,
+    ]),
+
+    ...(envFile
+      ? [
+          "--env-file",
+          envFile,
+        ]
+      : []),
+
+    ...Object.entries(env).flatMap(
+      ([key, value]) => [
+        "-e",
+        `${key}=${value}`,
+      ],
+    ),
+
+    ...volumes.flatMap((entry) => [
+      "-v",
+      entry,
+    ]),
+
+    image,
+
+    ...command,
+  );
+
+  return args;
+}
+
+export async function startBackgroundContainer(
+  options,
+) {
+  await removeContainerIfExists(
+    options.name,
+  );
+
+  return runDocker(
+    buildStartBackgroundContainerArgs(
+      options,
+    ),
+  );
+}
 export async function startContainer(options) {
   await removeContainerIfExists(
     options.name,

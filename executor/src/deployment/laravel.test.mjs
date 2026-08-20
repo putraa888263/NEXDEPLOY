@@ -20,6 +20,8 @@ import test from "node:test";
 
 import {
   buildEntrypointCommand,
+  buildQueueWorkerCommand,
+  buildSchedulerCommand,
   buildRuntimeEnvironment,
   composerInstallCommand,
   CONTAINER_PORT,
@@ -707,6 +709,70 @@ test(
         "",
       ),
       "Perintah Laravel gagal tanpa pesan.",
+    );
+  },
+);
+test(
+  "queue worker command uses Laravel queue:work",
+  () => {
+    const command =
+      buildQueueWorkerCommand();
+
+    assert.deepStrictEqual(
+      command.slice(
+        0,
+        3,
+      ),
+      [
+        "php",
+        "artisan",
+        "queue:work",
+      ],
+    );
+
+    assert.ok(
+      command.includes(
+        "--tries=3",
+      ),
+    );
+
+    assert.ok(
+      command.includes(
+        "--timeout=90",
+      ),
+    );
+  },
+);
+
+test(
+  "scheduler command uses Laravel schedule:work",
+  () => {
+    const command =
+      buildSchedulerCommand();
+
+    assert.deepStrictEqual(
+      command.slice(
+        0,
+        3,
+      ),
+      [
+        "php",
+        "artisan",
+        "schedule:work",
+      ],
+    );
+  },
+);
+
+test(
+  "production runtime defaults queue to database",
+  () => {
+    const env =
+      buildRuntimeEnvironment();
+
+    assert.equal(
+      env.QUEUE_CONNECTION,
+      "database",
     );
   },
 );

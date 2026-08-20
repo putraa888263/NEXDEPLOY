@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildImage,
   buildStartContainerArgs,
+  buildStartBackgroundContainerArgs,
   ensureNetwork,
   startContainer,
   stopContainer,
@@ -262,6 +263,117 @@ test(
           ),
       ),
       false,
+    );
+  },
+);
+test(
+  "background container does not publish a host port",
+  () => {
+    const args =
+      buildStartBackgroundContainerArgs({
+        name:
+          "nexdeploy-demo-worker",
+        image:
+          "nexdeploy/demo:abc",
+        network:
+          "nexdeploy-demo-network",
+        envFile:
+          "/projects/demo/.env",
+        command: [
+          "php",
+          "artisan",
+          "queue:work",
+        ],
+      });
+
+    assert.equal(
+      args.includes("-p"),
+      false,
+    );
+
+    assert.equal(
+      args.includes(
+        "--publish",
+      ),
+      false,
+    );
+  },
+);
+
+test(
+  "background container uses restart unless-stopped",
+  () => {
+    const args =
+      buildStartBackgroundContainerArgs({
+        name:
+          "nexdeploy-demo-worker",
+        image:
+          "nexdeploy/demo:abc",
+        network:
+          "nexdeploy-demo-network",
+      });
+
+    const index =
+      args.indexOf(
+        "--restart",
+      );
+
+    assert.ok(
+      index >= 0,
+    );
+
+    assert.equal(
+      args[index + 1],
+      "unless-stopped",
+    );
+  },
+);
+
+test(
+  "background container env-file and command appear after docker options",
+  () => {
+    const args =
+      buildStartBackgroundContainerArgs({
+        name:
+          "nexdeploy-demo-scheduler",
+        image:
+          "nexdeploy/demo:abc",
+        network:
+          "nexdeploy-demo-network",
+        envFile:
+          "/projects/demo/.env",
+        command: [
+          "php",
+          "artisan",
+          "schedule:work",
+        ],
+      });
+
+    const envIndex =
+      args.indexOf(
+        "--env-file",
+      );
+
+    const imageIndex =
+      args.indexOf(
+        "nexdeploy/demo:abc",
+      );
+
+    const phpIndex =
+      args.indexOf(
+        "php",
+      );
+
+    assert.ok(
+      envIndex >= 0,
+    );
+
+    assert.ok(
+      imageIndex > envIndex,
+    );
+
+    assert.ok(
+      phpIndex > imageIndex,
     );
   },
 );

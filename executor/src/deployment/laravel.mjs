@@ -12,7 +12,7 @@ import {
   randomBytes,
 } from "node:crypto";
 
-export const LARAVEL_PHP_VERSION = "8.3";
+export const LARAVEL_PHP_VERSION = "8.4";
 
 export const LARAVEL_RUNTIME_IMAGE =
   `nexdeploy/laravel-runtime:php-${LARAVEL_PHP_VERSION}`;
@@ -204,7 +204,7 @@ export function buildRuntimeEnvironment() {
     CACHE_STORE: "array",
     CACHE_DRIVER: "array",
     SESSION_DRIVER: "array",
-    QUEUE_CONNECTION: "sync",
+    QUEUE_CONNECTION: "database",
   };
 }
 
@@ -336,4 +336,24 @@ export function summarizeFailure(
   return lines
     .slice(-6)
     .join("\n");
+}
+export function buildQueueWorkerCommand() {
+  return [
+    "php",
+    "artisan",
+    "queue:work",
+    "--sleep=3",
+    "--tries=3",
+    "--timeout=90",
+    "--no-interaction",
+  ];
+}
+
+export function buildSchedulerCommand() {
+  return [
+    "php",
+    "artisan",
+    "schedule:work",
+    "--no-interaction",
+  ];
 }

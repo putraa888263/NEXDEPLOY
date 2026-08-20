@@ -49,6 +49,7 @@ import {
 import {
   ensureNetwork,
   startContainer,
+  startBackgroundContainer,
   buildImage,
   runOneShot,
   listContainersByLabel,
@@ -70,6 +71,8 @@ import {
   composerInstallCommand,
   frontendBuildCommand,
   buildEntrypointCommand,
+  buildQueueWorkerCommand,
+  buildSchedulerCommand,
   buildRuntimeEnvironment,
   mergeEnvFile,
   summarizeFailure,
@@ -954,11 +957,25 @@ async function deployLaravelRelease(
     "Menjalankan kontainer aplikasi.",
   );
 
-  const existingContainers = await listContainersByLabel(
-    label(PROJECT_LABEL_KEY, slug),
-  );
+  const projectContainers =
+    await listContainersByLabel(
+      label(
+        PROJECT_LABEL_KEY,
+        slug,
+      ),
+    );
 
-  const stablePortPath = join(
+  const appContainerPrefix =
+    `nexdeploy-${slug}-app-`;
+
+  const existingContainers =
+    projectContainers.filter(
+      (name) =>
+        name.startsWith(
+          appContainerPrefix,
+        ),
+    );
+const stablePortPath = join(
     projectsDir,
     projectId,
     ".nexdeploy-stable-port",
@@ -1201,6 +1218,95 @@ async function deployLaravelRelease(
     hostPort = stableHostPort;
   }
 
+  await log(
+    job,
+    "info",
+    "Menjalankan Laravel queue worker dan scheduler.",
+  );
+
+  const workerContainer =
+    `nexdeploy-${slug}-worker`;
+
+  const schedulerContainer =
+    `nexdeploy-${slug}-scheduler`;
+
+  const runtimeNetworks = [
+    process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+      "nexdeploy_nexdeploy-internal",
+  ];
+
+  try {
+    await startBackgroundContainer({
+      name:
+        workerContainer,
+
+      image,
+
+      network,
+
+      additionalNetworks:
+        runtimeNetworks,
+
+      envFile:
+        join(
+          release,
+          ".env",
+        ),
+
+      labels,
+
+      command:
+        buildQueueWorkerCommand(),
+    });
+
+    await startBackgroundContainer({
+      name:
+        schedulerContainer,
+
+      image,
+
+      network,
+
+      additionalNetworks:
+        runtimeNetworks,
+
+      envFile:
+        join(
+          release,
+          ".env",
+        ),
+
+      labels,
+
+      command:
+        buildSchedulerCommand(),
+    });
+  } catch (error) {
+    await removeContainerIfExists(
+      workerContainer,
+    ).catch(
+      () => {},
+    );
+
+    await removeContainerIfExists(
+      schedulerContainer,
+    ).catch(
+      () => {},
+    );
+
+    throw new DeployStageError(
+      "starting",
+      `Laravel runtime services gagal dijalankan: ${summarizeFailure(
+        error?.message,
+      )}`,
+    );
+  }
+
+  await log(
+    job,
+    "success",
+    `Laravel runtime services aktif: ${workerContainer}, ${schedulerContainer}.`,
+  );
   job.hostPort = stableHostPort;
   job.status =
     "running";
