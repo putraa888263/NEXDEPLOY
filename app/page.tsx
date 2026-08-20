@@ -36,7 +36,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { KeyRound, FormEvent, useEffect, useMemo, useState , useCallback} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type View = "dashboard" | "projects" | "activity" | "backups" | "settings";
 type ProjectStatus = "Healthy" | "Deploying" | "Stopped";
@@ -440,20 +440,48 @@ function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; ref
   }, [projectId]);
 
   useEffect(() => {
-    const interval: NodeJS.Timeout;
     const poll = async () => {
       const deps = await refresh();
       const latest = deps[0];
-      if (latest && (latest.status === "Succeeded" || latest.status === "Failed")) {
+
+      if (
+        latest &&
+        (
+          latest.status === "Succeeded" ||
+          latest.status === "Failed"
+        )
+      ) {
         refreshProjects();
-        clearInterval(interval);
+        return true;
       }
+
+      return false;
     };
 
-    poll();
-    interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
+    let cancelled = false;
 
+    const interval = setInterval(() => {
+      if (cancelled) {
+        return;
+      }
+
+      void poll().then((finished) => {
+        if (finished) {
+          clearInterval(interval);
+        }
+      });
+    }, 2000);
+
+    void poll().then((finished) => {
+      if (finished) {
+        clearInterval(interval);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [refresh, refreshProjects]);
 
   const retry = async (deployment: Deployment) => { const response = await fetch(`/api/deployments/${deployment.id}/retry`, { method: "POST" }); await response.json(); if (!response.ok) return; await refresh(); };
