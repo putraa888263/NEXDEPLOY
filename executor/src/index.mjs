@@ -63,6 +63,10 @@ import {
   loadProjectEnvironment,
   saveProjectEnvironment,
 } from "./deployment/environment.mjs";
+
+import {
+  sanitizeLogMessage,
+} from "./deployment/logs.mjs";
 import {
   ensureProjectDatabase,
   backupProjectDatabase,
@@ -273,29 +277,6 @@ async function save(job) {
   );
 }
 
-function sanitizeLogMessage(
-  message,
-) {
-  return String(
-    message,
-  )
-    .replace(
-      /\b(authorization)\s*:\s*bearer\s+[^\s,;]+/gi,
-      "$1: Bearer [REDACTED]",
-    )
-    .replace(
-      /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
-      "Bearer [REDACTED]",
-    )
-    .replace(
-      /\b(APP_KEY|DB_PASSWORD|DB_USERNAME|DATABASE_URL|REDIS_PASSWORD|MAIL_PASSWORD|API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/gi,
-      "$1=[REDACTED]",
-    )
-    .replace(
-      /("?(?:password|token|secret|api[_-]?key|app[_-]?key|db[_-]?password)"?\s*:\s*)("[^"]*"|'[^']*'|[^,\s}]+)/gi,
-      '$1"[REDACTED]"',
-    );
-}
 
 async function load(id) {
   if (
@@ -336,9 +317,7 @@ async function log(
       new Date().toISOString(),
     level,
     message:
-      sanitizeLogMessage(
-        message,
-      ),
+      sanitizeLogMessage(message),
   });
 
   await save(job);
