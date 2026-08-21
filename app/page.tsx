@@ -444,7 +444,10 @@ function LogPanel({
 
     if (!historyResponse.ok) {
       setLoading(false);
-      return null;
+      return {
+        deployment: null,
+        logs: [],
+      };
     }
 
     const history = await historyResponse.json();
@@ -461,7 +464,10 @@ function LogPanel({
       setDeployment(null);
       setLogs([]);
       setLoading(false);
-      return null;
+      return {
+        deployment: null,
+        logs: [],
+      };
     }
 
     setDeployment(target);
@@ -472,7 +478,10 @@ function LogPanel({
 
     if (logResponse.ok) {
       const output = await logResponse.json();
-      setLogs(output.logs ?? []);
+      const nextLogs =
+        (output.logs ?? []) as DeploymentLog[];
+
+      setLogs(nextLogs);
 
       if (output.deployment) {
         const syncedDeployment = {
@@ -482,12 +491,18 @@ function LogPanel({
 
         setDeployment(syncedDeployment);
         setLoading(false);
-        return syncedDeployment;
+        return {
+          deployment: syncedDeployment,
+          logs: nextLogs,
+        };
       }
     }
 
     setLoading(false);
-    return target;
+    return {
+      deployment: target,
+      logs: [],
+    };
   }, [deploymentId, projectId]);
 
   useEffect(() => {
@@ -500,13 +515,23 @@ function LogPanel({
       }
 
       const current = await load();
+      const currentDeployment =
+        current.deployment;
+
+      const hasTerminalExecutorLog =
+        current.logs.some((log) =>
+          /\[(SUCCESS|FAILURE|NPM|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
+            log.message,
+          ),
+        );
 
       if (
-        current &&
+        currentDeployment &&
         (
-          current.status === "Succeeded" ||
-          current.status === "Failed"
-        )
+          currentDeployment.status === "Succeeded" ||
+          currentDeployment.status === "Failed"
+        ) &&
+        hasTerminalExecutorLog
       ) {
         if (interval) {
           clearInterval(interval);
