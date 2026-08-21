@@ -3,7 +3,14 @@ import { env } from "cloudflare:workers";
 import { decryptEnvironmentValue } from "./environment";
 import { ensureNpmProxyHost } from "./npm";
 
-type ProjectForDeployment = { id: string; name: string; archive_key: string; archive_name: string; framework: string };
+type ProjectForDeployment = {
+  id: string;
+  name: string;
+  archive_key: string;
+  archive_name: string;
+  framework: string;
+  domain?: string | null;
+};
 
 function sanitizeDeploymentLog(message: string) {
   return message
@@ -584,7 +591,7 @@ export async function processDeployment(deploymentId: string, project: ProjectFo
           valueEncrypted: string;
         }>();
 
-    const deploymentEnvironment =
+    const savedEnvironment =
       Object.fromEntries(
         await Promise.all(
           (environmentRows.results ?? []).map(
@@ -597,6 +604,22 @@ export async function processDeployment(deploymentId: string, project: ProjectFo
           ),
         ),
       );
+
+    const httpsProjectUrl =
+      project.domain
+        ? `https://${project.domain}`
+        : "";
+
+    const deploymentEnvironment = {
+      ...(httpsProjectUrl
+        ? {
+            APP_URL: httpsProjectUrl,
+            ASSET_URL: httpsProjectUrl,
+            VITE_APP_URL: httpsProjectUrl,
+          }
+        : {}),
+      ...savedEnvironment,
+    };
 
     const response = await fetch(`${executor.url}/jobs/deploy`, {
       method: "POST",
