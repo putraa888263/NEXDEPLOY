@@ -27,25 +27,6 @@ function sanitizeLogForClient(message: string) {
     );
 }
 
-function hasFinalLog(
-  logs: Array<{ message: unknown }>,
-  status?: string,
-) {
-  if (status === "Succeeded") {
-    return logs.some((log) =>
-      /\[(SUCCESS|NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
-        String(log.message),
-      ),
-    );
-  }
-
-  return logs.some((log) =>
-    /\[FAILURE\]|Deployment gagal pada tahap/.test(
-      String(log.message),
-    ),
-  );
-}
-
 async function readDeploymentLogs(id: string) {
   const results = await getD1()
     .prepare(
@@ -90,33 +71,10 @@ export async function GET(
 
   const { id } = await params;
 
-  let rows: Array<{ message: unknown }> = [];
-  let deployment:
-    Awaited<ReturnType<typeof readDeployment>> =
-      null;
+  await syncExecutorDeployment(id);
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await syncExecutorDeployment(id);
-
-    rows = await readDeploymentLogs(id);
-    deployment = await readDeployment(id);
-
-    const terminalStatus =
-      deployment?.status === "Succeeded" ||
-      deployment?.status === "Failed";
-
-    if (
-      !terminalStatus ||
-      hasFinalLog(rows, deployment?.status) ||
-      attempt === 2
-    ) {
-      break;
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, 600),
-    );
-  }
+  const rows = await readDeploymentLogs(id);
+  const deployment = await readDeployment(id);
 
   const logs =
     rows.map((log) => ({

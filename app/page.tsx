@@ -429,7 +429,7 @@ function deploymentHasFinalLog(
 ) {
   if (status === "Succeeded") {
     return logs.some((log) =>
-      /\[(SUCCESS|NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan/.test(
+      /\[(NPM|NPM_SKIP|NPM_ERROR)\]/.test(
         log.message,
       ),
     );
@@ -530,7 +530,7 @@ function LogPanel({
 
   useEffect(() => {
     let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
 
     const poll = async () => {
       if (cancelled) {
@@ -555,24 +555,23 @@ function LogPanel({
         ) &&
         hasFinalLog
       ) {
-        if (interval) {
-          clearInterval(interval);
-          interval = null;
-        }
+        return;
+      }
+
+      if (!cancelled) {
+        timeout = setTimeout(() => {
+          void poll();
+        }, 1500);
       }
     };
 
     void poll();
 
-    interval = setInterval(() => {
-      void poll();
-    }, 1500);
-
     return () => {
       cancelled = true;
 
-      if (interval) {
-        clearInterval(interval);
+      if (timeout) {
+        clearTimeout(timeout);
       }
     };
   }, [load]);
