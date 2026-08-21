@@ -1404,14 +1404,9 @@ const stablePortPath = join(
     `Laravel runtime services aktif: ${workerContainer}, ${schedulerContainer}.`,
   );
   job.hostPort = stableHostPort;
-  job.status =
-    "running";
 
   job.startedAt =
     job.startedAt ||
-    new Date().toISOString();
-
-  job.finishedAt =
     new Date().toISOString();
 
   await log(
@@ -1419,6 +1414,12 @@ const stablePortPath = join(
     "success",
     `[SUCCESS] Deployment Laravel selesai. Release aktif pada stable host port ${stableHostPort}.`,
   );
+
+  job.status =
+    "succeeded";
+
+  job.finishedAt =
+    new Date().toISOString();
 
   await save(job);
 

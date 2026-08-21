@@ -33,7 +33,7 @@ function hasFinalLog(
 ) {
   if (status === "Succeeded") {
     return logs.some((log) =>
-      /\[(NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
+      /\[(SUCCESS|NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
         String(log.message),
       ),
     );
