@@ -429,7 +429,7 @@ function deploymentHasFinalLog(
 ) {
   if (status === "Succeeded") {
     return logs.some((log) =>
-      /\[(NPM|NPM_SSL|NPM_SKIP|NPM_ERROR|DOMAIN_HEALTHCHECK)\]/.test(
+      /\[(NPM|NPM_SSL|NPM_SKIP|NPM_ERROR)\]/.test(
         log.message,
       ),
     );

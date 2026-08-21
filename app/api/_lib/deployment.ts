@@ -82,70 +82,6 @@ async function writeLogOnce(
   );
 }
 
-async function checkProjectHttpsDomain(
-  deploymentId: string,
-  domain: string,
-  executorUrl: string,
-  executorToken: string,
-) {
-  const url = `https://${domain}`;
-
-  try {
-    const response =
-      await fetch(
-        `${executorUrl}/healthchecks/domain`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${executorToken}`,
-          },
-          body: JSON.stringify({
-            domain,
-          }),
-        },
-      );
-
-    const result =
-      await response.json().catch(() => ({})) as {
-        status?: number;
-        error?: string;
-      };
-
-    if (response.ok) {
-      await writeLogOnce(
-        deploymentId,
-        "success",
-        "[DOMAIN_HEALTHCHECK]",
-        `${url} merespons HTTP ${result.status ?? response.status}.`,
-      );
-
-      return;
-    }
-
-    await writeLogOnce(
-      deploymentId,
-      "warning",
-      "[DOMAIN_HEALTHCHECK]",
-      result.status
-        ? `${url} merespons HTTP ${result.status}; periksa routing aplikasi bila tampilan belum normal.`
-        : `${url} belum bisa diverifikasi oleh executor: ${result.error ?? `HTTP ${response.status}`}.`,
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "request gagal";
-
-    await writeLogOnce(
-      deploymentId,
-      "warning",
-      "[DOMAIN_HEALTHCHECK]",
-      `${url} belum bisa diverifikasi: ${message}.`,
-    );
-  }
-}
-
 type ExecutorLog = { at?: string; level?: "info" | "success" | "warning" | "error"; message?: string };
 
 export async function syncExecutorDeployment(deploymentId: string) {
@@ -531,23 +467,17 @@ async function syncProjectProxyHost(
       `SELECT
         projects.domain,
         settings.npm_url AS npmUrl,
-        settings.server_ip AS serverIp,
-        executor_settings.url AS executorUrl,
-        executor_settings.token_encrypted AS executorTokenEncrypted
+        settings.server_ip AS serverIp
        FROM projects
        CROSS JOIN settings
-       CROSS JOIN executor_settings
        WHERE projects.id = ?
-       AND settings.id = 1
-       AND executor_settings.id = 1`,
+       AND settings.id = 1`,
     )
     .bind(projectId)
     .first<{
       domain: string;
       npmUrl: string;
       serverIp: string;
-      executorUrl: string;
-      executorTokenEncrypted: string;
     }>();
 
   if (!row?.domain || !row.npmUrl) {
@@ -610,17 +540,6 @@ async function syncProjectProxyHost(
       result.ssl ? "[NPM_SSL]" : "[NPM]",
       `Proxy Host ${row.domain} diarahkan ke ${forwardHost}:${hostPort}${result.ssl ? " dengan SSL." : "."}`,
     );
-
-    if (result.ssl) {
-      await checkProjectHttpsDomain(
-        deploymentId,
-        row.domain,
-        row.executorUrl,
-        await decryptEnvironmentValue(
-          row.executorTokenEncrypted,
-        ),
-      );
-    }
   } catch (error) {
     const message =
       error instanceof Error
