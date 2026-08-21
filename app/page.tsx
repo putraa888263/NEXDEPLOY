@@ -521,7 +521,7 @@ function LogPanel({
       const hasFinalLog =
         current.logs.some((log) =>
           currentDeployment?.status === "Succeeded"
-            ? /\[(NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
+            ? /\[(SUCCESS|NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
                 log.message,
               )
             : /\[FAILURE\]|Deployment gagal pada tahap/.test(
