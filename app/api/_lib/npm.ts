@@ -216,7 +216,6 @@ async function ensureNpmCertificate(
           domain_names: [domain],
           meta: {
             letsencrypt_agree: true,
-            dns_challenge: false,
           },
         }),
       },
