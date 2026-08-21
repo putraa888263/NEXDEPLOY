@@ -82,6 +82,67 @@ async function writeLogOnce(
   );
 }
 
+async function checkProjectHttpsDomain(
+  deploymentId: string,
+  domain: string,
+) {
+  const url = `https://${domain}`;
+  const controller =
+    new AbortController();
+  const timeout =
+    setTimeout(
+      () => controller.abort(),
+      10_000,
+    );
+
+  try {
+    const response =
+      await fetch(
+        url,
+        {
+          method: "GET",
+          redirect: "follow",
+          signal: controller.signal,
+        },
+      );
+
+    if (
+      response.status >= 200 &&
+      response.status < 400
+    ) {
+      await writeLogOnce(
+        deploymentId,
+        "success",
+        "[DOMAIN_HEALTHCHECK]",
+        `${url} merespons HTTP ${response.status}.`,
+      );
+
+      return;
+    }
+
+    await writeLogOnce(
+      deploymentId,
+      "warning",
+      "[DOMAIN_HEALTHCHECK]",
+      `${url} merespons HTTP ${response.status}; periksa routing aplikasi bila tampilan belum normal.`,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "request gagal";
+
+    await writeLogOnce(
+      deploymentId,
+      "warning",
+      "[DOMAIN_HEALTHCHECK]",
+      `${url} belum bisa diverifikasi: ${message}.`,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 type ExecutorLog = { at?: string; level?: "info" | "success" | "warning" | "error"; message?: string };
 
 export async function syncExecutorDeployment(deploymentId: string) {
@@ -540,6 +601,13 @@ async function syncProjectProxyHost(
       result.ssl ? "[NPM_SSL]" : "[NPM]",
       `Proxy Host ${row.domain} diarahkan ke ${forwardHost}:${hostPort}${result.ssl ? " dengan SSL." : "."}`,
     );
+
+    if (result.ssl) {
+      await checkProjectHttpsDomain(
+        deploymentId,
+        row.domain,
+      );
+    }
   } catch (error) {
     const message =
       error instanceof Error
