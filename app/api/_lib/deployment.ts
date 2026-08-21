@@ -530,7 +530,7 @@ async function syncProjectProxyHost(
     await writeLogOnce(
       deploymentId,
       "success",
-      "[NPM]",
+      result.ssl ? "[NPM_SSL]" : "[NPM]",
       `Proxy Host ${row.domain} diarahkan ke ${forwardHost}:${hostPort}${result.ssl ? " dengan SSL." : "."}`,
     );
   } catch (error) {

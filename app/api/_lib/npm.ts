@@ -5,6 +5,11 @@ type NpmProxyHost = {
   domain_names?: string[];
 };
 
+type NpmCertificate = {
+  id: number;
+  domain_names?: string[];
+};
+
 type EnsureNpmProxyHostInput = {
   domain: string;
   forwardHost: string;
@@ -30,6 +35,16 @@ function getNpmEnv() {
 
 function normalizeNpmUrl(url: string) {
   return url.replace(/\/+$/, "");
+}
+
+function validateDomain(domain: string) {
+  if (
+    !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(
+      domain,
+    )
+  ) {
+    throw new Error("Domain project tidak valid untuk NPM.");
+  }
 }
 
 async function readNpmError(response: Response) {
@@ -108,10 +123,10 @@ async function npmFetch<T>(
 
 function buildProxyHostPayload(
   input: EnsureNpmProxyHostInput,
+  certificateId: number,
 ) {
   const {
     accessListId,
-    certificateId,
   } = getNpmEnv();
 
   return {
@@ -138,6 +153,78 @@ function buildProxyHostPayload(
   };
 }
 
+async function ensureNpmCertificate(
+  npmUrl: string,
+  token: string,
+  domain: string,
+  configuredCertificateId: number,
+) {
+  if (configuredCertificateId > 0) {
+    return configuredCertificateId;
+  }
+
+  const certificates =
+    await npmFetch<NpmCertificate[]>(
+      npmUrl,
+      token,
+      "/api/nginx/certificates",
+    );
+
+  const existing =
+    certificates.find((certificate) =>
+      (certificate.domain_names ?? []).includes(domain),
+    );
+
+  if (existing) {
+    return existing.id;
+  }
+
+  const reachability =
+    await npmFetch<Record<string, string>>(
+      npmUrl,
+      token,
+      "/api/nginx/certificates/test-http",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          domains: [domain],
+        }),
+      },
+    );
+
+  if (reachability[domain] !== "ok") {
+    throw new Error(
+      `HTTP challenge NPM untuk ${domain} gagal: ${reachability[domain] ?? "tidak ada respons"}.`,
+    );
+  }
+
+  const created =
+    await npmFetch<NpmCertificate>(
+      npmUrl,
+      token,
+      "/api/nginx/certificates",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "letsencrypt",
+          domain_names: [domain],
+          meta: {
+            letsencrypt_agree: true,
+            dns_challenge: false,
+          },
+        }),
+      },
+    );
+
+  if (!created.id) {
+    throw new Error(
+      "NPM tidak mengembalikan ID sertifikat Let's Encrypt.",
+    );
+  }
+
+  return created.id;
+}
+
 export async function ensureNpmProxyHost(
   input: EnsureNpmProxyHostInput,
 ) {
@@ -156,6 +243,8 @@ export async function ensureNpmProxyHost(
 
   const npmUrl =
     normalizeNpmUrl(input.npmUrl);
+
+  validateDomain(input.domain);
 
   const token =
     await getNpmToken(
@@ -178,8 +267,19 @@ export async function ensureNpmProxyHost(
       ),
     );
 
+  const resolvedCertificateId =
+    await ensureNpmCertificate(
+      npmUrl,
+      token,
+      input.domain,
+      certificateId,
+    );
+
   const payload =
-    buildProxyHostPayload(input);
+    buildProxyHostPayload(
+      input,
+      resolvedCertificateId,
+    );
 
   if (existing) {
     await npmFetch<NpmProxyHost>(
@@ -197,7 +297,8 @@ export async function ensureNpmProxyHost(
       created: false,
       updated: true,
       id: existing.id,
-      ssl: certificateId > 0,
+      ssl: resolvedCertificateId > 0,
+      certificateId: resolvedCertificateId,
     };
   }
 
@@ -217,6 +318,7 @@ export async function ensureNpmProxyHost(
     created: true,
     updated: false,
     id: created.id,
-    ssl: certificateId > 0,
+    ssl: resolvedCertificateId > 0,
+    certificateId: resolvedCertificateId,
   };
 }

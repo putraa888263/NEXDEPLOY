@@ -88,7 +88,7 @@ NPM_CERTIFICATE_ID=0
 
 `NPM_FORWARD_HOST` adalah alamat yang akan dipakai NPM untuk meneruskan trafik ke stable port project, misalnya `IP_VPS:20000`.
 
-Jika Bos sudah punya wildcard certificate di NPM untuk `*.neversdigital.cloud`, isi `NPM_CERTIFICATE_ID` dengan ID certificate tersebut agar Proxy Host otomatis memakai SSL. Jika `NPM_CERTIFICATE_ID=0`, Proxy Host tetap dibuat otomatis tetapi tanpa SSL paksa.
+Jika Bos sudah punya wildcard certificate di NPM untuk `*.neversdigital.cloud`, isi `NPM_CERTIFICATE_ID` dengan ID certificate tersebut. Jika `NPM_CERTIFICATE_ID=0`, panel akan memakai ulang sertifikat domain yang sudah ada atau meminta sertifikat Let's Encrypt HTTP baru secara otomatis. Pastikan DNS domain dan port 80 mengarah ke NPM serta akun NPM mempunyai email yang valid.
 
 Setelah deployment Laravel sukses, panel akan membuat atau memperbarui Proxy Host:
 
@@ -99,6 +99,8 @@ Forward Hostname / IP: nilai NPM_FORWARD_HOST
 Forward Port: stable host port deployment
 Block Common Exploits: ON
 Websockets Support: ON
+SSL Certificate: sertifikat yang dikonfigurasi atau Let's Encrypt per domain
+Force SSL: ON
 ```
 
 Jangan expose atau proxy service `executor`. Executor hanya untuk komunikasi internal panel.
