@@ -7,8 +7,37 @@
   export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
     await requireUser(request);
     const { id } = await params;
-    const pending = await getD1().prepare("SELECT id FROM deployments WHERE project_id = ? AND executor_job_id IS NOT NULL AND status IN ('Queued', 'Running', 'WaitingExecutor') ORDER BY created_at DESC LIMIT 5").bind(id).all<{ id: string }>();
-    await Promise.all((pending.results ?? []).map((deployment) => syncExecutorDeployment(deployment.id)));
+    const pending = await getD1()
+      .prepare(
+        `SELECT deployments.id
+         FROM deployments
+         WHERE deployments.project_id = ?
+         AND deployments.executor_job_id IS NOT NULL
+         AND (
+           deployments.status IN ('Queued', 'Running', 'WaitingExecutor')
+           OR NOT EXISTS (
+             SELECT 1
+             FROM deployment_logs
+             WHERE deployment_logs.deployment_id = deployments.id
+             AND (
+               deployment_logs.message LIKE '%[SUCCESS]%'
+               OR deployment_logs.message LIKE '%Aplikasi Laravel berhasil dijalankan%'
+               OR deployment_logs.message LIKE '%[FAILURE]%'
+               OR deployment_logs.message LIKE '%Deployment gagal pada tahap%'
+             )
+           )
+         )
+         ORDER BY deployments.created_at DESC
+         LIMIT 5`,
+      )
+      .bind(id)
+      .all<{ id: string }>();
+
+    await Promise.all(
+      (pending.results ?? []).map((deployment) =>
+        syncExecutorDeployment(deployment.id),
+      ),
+    );
     const results = await getD1().prepare("SELECT id, status, archive_name AS archiveName, executor, action, source_deployment_id AS sourceDeploymentId, error, created_at AS createdAt, started_at AS startedAt, finished_at AS finishedAt FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 20").bind(id).all();
     return NextResponse.json({ deployments: results.results ?? [] });
   }

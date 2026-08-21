@@ -423,6 +423,29 @@ function OverviewTab({ project, notify }: { project: Project; notify: (message: 
   </aside></div>;
 }
 
+function deploymentHasFinalLog(
+  status: Deployment["status"] | undefined,
+  logs: DeploymentLog[],
+) {
+  if (status === "Succeeded") {
+    return logs.some((log) =>
+      /\[(SUCCESS|NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan/.test(
+        log.message,
+      ),
+    );
+  }
+
+  if (status === "Failed") {
+    return logs.some((log) =>
+      /\[FAILURE\]|Deployment gagal pada tahap/.test(
+        log.message,
+      ),
+    );
+  }
+
+  return false;
+}
+
 function LogPanel({
   compact = false,
   projectId,
@@ -519,14 +542,9 @@ function LogPanel({
         current.deployment;
 
       const hasFinalLog =
-        current.logs.some((log) =>
-          currentDeployment?.status === "Succeeded"
-            ? /\[(SUCCESS|NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
-                log.message,
-              )
-            : /\[FAILURE\]|Deployment gagal pada tahap/.test(
-                log.message,
-              ),
+        deploymentHasFinalLog(
+          currentDeployment?.status,
+          current.logs,
         );
 
       if (
@@ -575,14 +593,9 @@ function LogPanel({
     deployment?.status === "WaitingExecutor";
 
   const hasFinalLog =
-    logs.some((log) =>
-      deployment?.status === "Succeeded"
-        ? /\[(NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
-            log.message,
-          )
-        : /\[FAILURE\]|Deployment gagal pada tahap/.test(
-            log.message,
-          ),
+    deploymentHasFinalLog(
+      deployment?.status,
+      logs,
     );
 
   return (
