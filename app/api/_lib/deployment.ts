@@ -85,36 +85,39 @@ async function writeLogOnce(
 async function checkProjectHttpsDomain(
   deploymentId: string,
   domain: string,
+  executorUrl: string,
+  executorToken: string,
 ) {
   const url = `https://${domain}`;
-  const controller =
-    new AbortController();
-  const timeout =
-    setTimeout(
-      () => controller.abort(),
-      10_000,
-    );
 
   try {
     const response =
       await fetch(
-        url,
+        `${executorUrl}/healthchecks/domain`,
         {
-          method: "GET",
-          redirect: "follow",
-          signal: controller.signal,
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${executorToken}`,
+          },
+          body: JSON.stringify({
+            domain,
+          }),
         },
       );
 
-    if (
-      response.status >= 200 &&
-      response.status < 400
-    ) {
+    const result =
+      await response.json().catch(() => ({})) as {
+        status?: number;
+        error?: string;
+      };
+
+    if (response.ok) {
       await writeLogOnce(
         deploymentId,
         "success",
         "[DOMAIN_HEALTHCHECK]",
-        `${url} merespons HTTP ${response.status}.`,
+        `${url} merespons HTTP ${result.status ?? response.status}.`,
       );
 
       return;
@@ -124,7 +127,9 @@ async function checkProjectHttpsDomain(
       deploymentId,
       "warning",
       "[DOMAIN_HEALTHCHECK]",
-      `${url} merespons HTTP ${response.status}; periksa routing aplikasi bila tampilan belum normal.`,
+      result.status
+        ? `${url} merespons HTTP ${result.status}; periksa routing aplikasi bila tampilan belum normal.`
+        : `${url} belum bisa diverifikasi oleh executor: ${result.error ?? `HTTP ${response.status}`}.`,
     );
   } catch (error) {
     const message =
@@ -138,8 +143,6 @@ async function checkProjectHttpsDomain(
       "[DOMAIN_HEALTHCHECK]",
       `${url} belum bisa diverifikasi: ${message}.`,
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -528,17 +531,23 @@ async function syncProjectProxyHost(
       `SELECT
         projects.domain,
         settings.npm_url AS npmUrl,
-        settings.server_ip AS serverIp
+        settings.server_ip AS serverIp,
+        executor_settings.url AS executorUrl,
+        executor_settings.token_encrypted AS executorTokenEncrypted
        FROM projects
        CROSS JOIN settings
+       CROSS JOIN executor_settings
        WHERE projects.id = ?
-       AND settings.id = 1`,
+       AND settings.id = 1
+       AND executor_settings.id = 1`,
     )
     .bind(projectId)
     .first<{
       domain: string;
       npmUrl: string;
       serverIp: string;
+      executorUrl: string;
+      executorTokenEncrypted: string;
     }>();
 
   if (!row?.domain || !row.npmUrl) {
@@ -606,6 +615,10 @@ async function syncProjectProxyHost(
       await checkProjectHttpsDomain(
         deploymentId,
         row.domain,
+        row.executorUrl,
+        await decryptEnvironmentValue(
+          row.executorTokenEncrypted,
+        ),
       );
     }
   } catch (error) {

@@ -250,6 +250,69 @@ function authorized(
   );
 }
 
+function validDomain(
+  domain,
+) {
+  return (
+    typeof domain === "string" &&
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(
+      domain,
+    )
+  );
+}
+
+async function checkHttpsDomain(
+  domain,
+) {
+  const controller =
+    new AbortController();
+  const timeout =
+    setTimeout(
+      () => controller.abort(),
+      10_000,
+    );
+
+  try {
+    const url =
+      `https://${domain}`;
+    const response =
+      await fetch(
+        url,
+        {
+          method: "GET",
+          redirect: "follow",
+          signal: controller.signal,
+        },
+      );
+
+    return {
+      ok:
+        response.status >= 200 &&
+        response.status < 400,
+
+      status:
+        response.status,
+
+      url,
+    };
+  } catch (error) {
+    return {
+      ok:
+        false,
+
+      error:
+        error instanceof Error
+          ? error.message
+          : "request gagal",
+
+      url:
+        `https://${domain}`,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function jobFile(id) {
   return join(
     stateDir,
@@ -1704,6 +1767,44 @@ const server =
               error:
                 "Token executor tidak valid.",
             },
+          );
+        }
+
+        if (
+          request.method ===
+            "POST" &&
+          url.pathname ===
+            "/healthchecks/domain"
+        ) {
+          const payload =
+            await body(
+              request,
+            );
+
+          if (
+            !validDomain(
+              payload.domain,
+            )
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "Domain healthcheck tidak valid.",
+              },
+            );
+          }
+
+          const result =
+            await checkHttpsDomain(
+              payload.domain,
+            );
+
+          return json(
+            response,
+            result.ok ? 200 : 502,
+            result,
           );
         }
 
