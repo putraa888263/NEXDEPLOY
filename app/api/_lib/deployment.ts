@@ -310,52 +310,88 @@ export async function syncExecutorDeployment(deploymentId: string) {
       }
     }
 
-    let copiedTerminalLog = false;
+    const copiedLogs =
+      await db
+        .prepare(
+          `SELECT message
+           FROM deployment_logs
+           WHERE deployment_id = ?
+           AND message LIKE ?`,
+        )
+        .bind(
+          deploymentId,
+          `[executor:${deployment.executor_job_id}:%`,
+        )
+        .all<{ message: string }>();
+
+    const copiedMarkers =
+      new Set(
+        (copiedLogs.results ?? [])
+          .map((row) =>
+            row.message.match(
+              /^\[executor:[^\]]+\]/,
+            )?.[0],
+          )
+          .filter((marker): marker is string =>
+            Boolean(marker),
+          ),
+      );
+
+    const copiedTerminalLog =
+      executorLogs.some((log) =>
+        /\[(SUCCESS|FAILURE)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
+          log.message ?? "",
+        ),
+      );
+
+    const missingLogWrites =
+      executorLogs.flatMap((log, index) => {
+        const marker =
+          `[executor:${deployment.executor_job_id}:${index}]`;
+
+        if (copiedMarkers.has(marker)) {
+          return [];
+        }
+
+        const message =
+          log.message ??
+          "Executor memperbarui job.";
+
+        const createdAt =
+          log.at && !Number.isNaN(Date.parse(log.at))
+            ? log.at
+            : now;
+
+        return [
+          db
+            .prepare(
+              `INSERT OR IGNORE INTO deployment_logs
+               (id, deployment_id, level, message, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              `executor:${deploymentId}:${deployment.executor_job_id}:${String(index).padStart(6, "0")}`,
+              deploymentId,
+              log.level ?? "info",
+              sanitizeDeploymentLog(
+                `${marker} ${message}`,
+              ),
+              createdAt,
+            ),
+        ];
+      });
 
     for (
-      const [
-        index,
-        log,
-      ] of (
-        executorLogs
-      ).entries()
+      let offset = 0;
+      offset < missingLogWrites.length;
+      offset += 50
     ) {
-      const marker =
-        `[executor:${deployment.executor_job_id}:${index}]`;
-
-      const message =
-        log.message ??
-        "Executor memperbarui job.";
-
-      if (
-        /\[(SUCCESS|FAILURE)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
-          message,
-        )
-      ) {
-        copiedTerminalLog = true;
-      }
-
-      const exists =
-        await db
-          .prepare(
-            `SELECT id
-             FROM deployment_logs
-             WHERE deployment_id = ?
-             AND message LIKE ?`,
-          )
-          .bind(
-            deploymentId,
-            `${marker}%`,
-          )
-          .first();
-
-      if (!exists) {
-        await writeLog(
-          deploymentId,
-          log.level ?? "info",
-          `${marker} ${message}`,
-        );
-      }
+      await db.batch(
+        missingLogWrites.slice(
+          offset,
+          offset + 50,
+        ),
+      );
     }
 
     if (
@@ -397,11 +433,18 @@ export async function syncExecutorDeployment(deploymentId: string) {
         job.job.hostPort,
       );
     }
-  } catch {
+  } catch (error) {
     /*
      * Executor mungkin sementara offline.
      * Pertahankan state terakhir yang diketahui.
      */
+    console.error(
+      `Sinkronisasi log executor gagal untuk deployment ${deploymentId}: ${sanitizeDeploymentLog(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      )}`,
+    );
   }
 }
 
