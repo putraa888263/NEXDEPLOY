@@ -570,6 +570,13 @@ function LogPanel({
     deployment?.status === "Running" ||
     deployment?.status === "WaitingExecutor";
 
+  const hasTerminalExecutorLog =
+    logs.some((log) =>
+      /\[(SUCCESS|FAILURE|NPM|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
+        log.message,
+      ),
+    );
+
   return (
     <section
       className={`panel log-panel ${
@@ -657,7 +664,8 @@ function LogPanel({
           </p>
         ) : null}
 
-        {deployment?.status === "Succeeded" ? (
+        {deployment?.status === "Succeeded" &&
+        hasTerminalExecutorLog ? (
           <p>
             <time>DONE</time>
             <span className="success">

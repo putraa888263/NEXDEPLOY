@@ -157,6 +157,23 @@ export async function syncExecutorDeployment(deploymentId: string) {
         logs?: ExecutorLog[];
       };
 
+    const executorLogs =
+      output.logs ?? [];
+
+    const hasExecutorSuccessLog =
+      executorLogs.some((log) =>
+        /\[SUCCESS\]|Aplikasi Laravel berhasil dijalankan/.test(
+          log.message ?? "",
+        ),
+      );
+
+    const hasExecutorFailureLog =
+      executorLogs.some((log) =>
+        /\[FAILURE\]|Deployment gagal pada tahap/.test(
+          log.message ?? "",
+        ),
+      );
+
     const executorStatus =
       job.job?.status;
 
@@ -164,13 +181,20 @@ export async function syncExecutorDeployment(deploymentId: string) {
       job.job?.finishedAt;
 
     const status =
-      executorStatus === "succeeded" ||
+      (
+        executorStatus === "succeeded" &&
+        hasExecutorSuccessLog
+      ) ||
       (
         executorStatus === "running" &&
-        finishedAt
+        finishedAt &&
+        hasExecutorSuccessLog
       )
         ? "Succeeded"
-        : executorStatus === "failed"
+        : (
+            executorStatus === "failed" ||
+            hasExecutorFailureLog
+          )
           ? "Failed"
           : executorStatus === "waiting_vps"
             ? "WaitingExecutor"
@@ -293,7 +317,7 @@ export async function syncExecutorDeployment(deploymentId: string) {
         index,
         log,
       ] of (
-        output.logs ?? []
+        executorLogs
       ).entries()
     ) {
       const marker =
