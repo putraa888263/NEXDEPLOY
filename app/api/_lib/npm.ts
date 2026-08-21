@@ -204,30 +204,81 @@ async function ensureNpmCertificate(
     );
   }
 
-  const created =
-    await npmFetch<NpmCertificate>(
-      npmUrl,
-      token,
-      "/api/nginx/certificates",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          provider: "letsencrypt",
-          domain_names: [domain],
-          meta: {
-            letsencrypt_agree: true,
-          },
-        }),
+  const certificatePayloads = [
+    {
+      provider: "letsencrypt",
+      domain_names: [domain],
+      meta: {
+        letsencrypt_agree: true,
       },
-    );
+    },
+    {
+      provider: "letsencrypt",
+      domain_names: [domain],
+      meta: {
+        dns_challenge: false,
+      },
+    },
+    {
+      provider: "letsencrypt",
+      domain_names: [domain],
+      meta: {},
+    },
+    {
+      provider: "letsencrypt",
+      domain_names: [domain],
+    },
+  ];
 
-  if (!created.id) {
-    throw new Error(
-      "NPM tidak mengembalikan ID sertifikat Let's Encrypt.",
-    );
+  let lastSchemaError: Error | null = null;
+
+  for (const payload of certificatePayloads) {
+    try {
+      const created =
+        await npmFetch<NpmCertificate>(
+          npmUrl,
+          token,
+          "/api/nginx/certificates",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          },
+        );
+
+      if (!created.id) {
+        throw new Error(
+          "NPM tidak mengembalikan ID sertifikat Let's Encrypt.",
+        );
+      }
+
+      return created.id;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      if (
+        !/additional properties|must NOT have|data\/meta|schema/i.test(
+          message,
+        )
+      ) {
+        throw error;
+      }
+
+      lastSchemaError =
+        error instanceof Error
+          ? error
+          : new Error(message);
+    }
   }
 
-  return created.id;
+  throw (
+    lastSchemaError ??
+    new Error(
+      "NPM menolak semua format payload sertifikat Let's Encrypt.",
+    )
+  );
 }
 
 export async function ensureNpmProxyHost(
