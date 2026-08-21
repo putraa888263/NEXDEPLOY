@@ -253,13 +253,6 @@ export async function syncExecutorDeployment(deploymentId: string) {
           )
           .run();
 
-        if (job.job?.hostPort) {
-          await syncProjectProxyHost(
-            deploymentId,
-            deployment.project_id,
-            job.job.hostPort,
-          );
-        }
       } else if (status === "Failed") {
         await db
           .prepare(
@@ -293,6 +286,8 @@ export async function syncExecutorDeployment(deploymentId: string) {
       }
     }
 
+    let copiedTerminalLog = false;
+
     for (
       const [
         index,
@@ -303,6 +298,18 @@ export async function syncExecutorDeployment(deploymentId: string) {
     ) {
       const marker =
         `[executor:${deployment.executor_job_id}:${index}]`;
+
+      const message =
+        log.message ??
+        "Executor memperbarui job.";
+
+      if (
+        /\[(SUCCESS|FAILURE)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
+          message,
+        )
+      ) {
+        copiedTerminalLog = true;
+      }
 
       const exists =
         await db
@@ -322,12 +329,22 @@ export async function syncExecutorDeployment(deploymentId: string) {
         await writeLog(
           deploymentId,
           log.level ?? "info",
-          `${marker} ${
-            log.message ??
-            "Executor memperbarui job."
-          }`,
+          `${marker} ${message}`,
         );
       }
+    }
+
+    if (
+      isLatestDeployment &&
+      status === "Succeeded" &&
+      job.job?.hostPort &&
+      copiedTerminalLog
+    ) {
+      await syncProjectProxyHost(
+        deploymentId,
+        deployment.project_id,
+        job.job.hostPort,
+      );
     }
   } catch {
     /*

@@ -27,16 +27,17 @@ function sanitizeLogForClient(message: string) {
     );
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
+function hasTerminalLog(
+  logs: Array<{ message: unknown }>,
 ) {
-  await requireUser(request);
+  return logs.some((log) =>
+    /\[(SUCCESS|FAILURE|NPM|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
+      String(log.message),
+    ),
+  );
+}
 
-  const { id } = await params;
-
-  await syncExecutorDeployment(id);
-
+async function readDeploymentLogs(id: string) {
   const results = await getD1()
     .prepare(
       `SELECT
@@ -51,15 +52,11 @@ export async function GET(
     .bind(id)
     .all();
 
-  const logs =
-    (results.results ?? []).map((log) => ({
-      ...log,
-      message: sanitizeLogForClient(
-        String(log.message),
-      ),
-    }));
+  return results.results ?? [];
+}
 
-  const deployment = await getD1()
+async function readDeployment(id: string) {
+  return await getD1()
     .prepare(
       `SELECT
         status,
@@ -69,7 +66,56 @@ export async function GET(
        WHERE id = ?`,
     )
     .bind(id)
-    .first();
+    .first<{
+      status?: string;
+      error?: string | null;
+      finishedAt?: string | null;
+    }>();
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  await requireUser(request);
+
+  const { id } = await params;
+
+  let rows: Array<{ message: unknown }> = [];
+  let deployment:
+    Awaited<ReturnType<typeof readDeployment>> =
+      null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await syncExecutorDeployment(id);
+
+    rows = await readDeploymentLogs(id);
+    deployment = await readDeployment(id);
+
+    const terminalStatus =
+      deployment?.status === "Succeeded" ||
+      deployment?.status === "Failed";
+
+    if (
+      !terminalStatus ||
+      hasTerminalLog(rows) ||
+      attempt === 2
+    ) {
+      break;
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, 600),
+    );
+  }
+
+  const logs =
+    rows.map((log) => ({
+      ...log,
+      message: sanitizeLogForClient(
+        String(log.message),
+      ),
+    }));
 
   return NextResponse.json({
     logs,
