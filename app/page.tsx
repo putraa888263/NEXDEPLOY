@@ -518,11 +518,15 @@ function LogPanel({
       const currentDeployment =
         current.deployment;
 
-      const hasTerminalExecutorLog =
+      const hasFinalLog =
         current.logs.some((log) =>
-          /\[(SUCCESS|FAILURE|NPM|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
-            log.message,
-          ),
+          currentDeployment?.status === "Succeeded"
+            ? /\[(NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
+                log.message,
+              )
+            : /\[FAILURE\]|Deployment gagal pada tahap/.test(
+                log.message,
+              ),
         );
 
       if (
@@ -531,7 +535,7 @@ function LogPanel({
           currentDeployment.status === "Succeeded" ||
           currentDeployment.status === "Failed"
         ) &&
-        hasTerminalExecutorLog
+        hasFinalLog
       ) {
         if (interval) {
           clearInterval(interval);
@@ -570,11 +574,15 @@ function LogPanel({
     deployment?.status === "Running" ||
     deployment?.status === "WaitingExecutor";
 
-  const hasTerminalExecutorLog =
+  const hasFinalLog =
     logs.some((log) =>
-      /\[(SUCCESS|FAILURE|NPM|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
-        log.message,
-      ),
+      deployment?.status === "Succeeded"
+        ? /\[(NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
+            log.message,
+          )
+        : /\[FAILURE\]|Deployment gagal pada tahap/.test(
+            log.message,
+          ),
     );
 
   return (
@@ -665,7 +673,7 @@ function LogPanel({
         ) : null}
 
         {deployment?.status === "Succeeded" &&
-        hasTerminalExecutorLog ? (
+        hasFinalLog ? (
           <p>
             <time>DONE</time>
             <span className="success">

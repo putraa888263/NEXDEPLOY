@@ -359,6 +359,33 @@ export async function syncExecutorDeployment(deploymentId: string) {
     }
 
     if (
+      status === "Succeeded" &&
+      copiedTerminalLog &&
+      !isLatestDeployment
+    ) {
+      await writeLogOnce(
+        deploymentId,
+        "warning",
+        "[NPM_SKIP]",
+        "Proxy Host otomatis dilewati karena deployment ini bukan deployment terbaru project.",
+      );
+    }
+
+    if (
+      isLatestDeployment &&
+      status === "Succeeded" &&
+      copiedTerminalLog &&
+      !job.job?.hostPort
+    ) {
+      await writeLogOnce(
+        deploymentId,
+        "warning",
+        "[NPM_SKIP]",
+        "Proxy Host otomatis dilewati karena executor belum mengembalikan stable host port.",
+      );
+    }
+
+    if (
       isLatestDeployment &&
       status === "Succeeded" &&
       job.job?.hostPort &&
@@ -404,6 +431,13 @@ async function syncProjectProxyHost(
     }>();
 
   if (!row?.domain || !row.npmUrl) {
+    await writeLogOnce(
+      deploymentId,
+      "warning",
+      "[NPM_SKIP]",
+      "Proxy Host otomatis dilewati karena domain project atau URL NPM belum dikonfigurasi.",
+    );
+
     return;
   }
 
@@ -413,10 +447,24 @@ async function syncProjectProxyHost(
       row.serverIp).trim();
 
   if (!forwardHost) {
+    await writeLogOnce(
+      deploymentId,
+      "warning",
+      "[NPM_SKIP]",
+      "Proxy Host otomatis dilewati karena NPM_FORWARD_HOST/server IP kosong.",
+    );
+
     return;
   }
 
   try {
+    await writeLogOnce(
+      deploymentId,
+      "info",
+      "[NPM_START]",
+      `Menyiapkan Proxy Host ${row.domain} ke ${forwardHost}:${hostPort}.`,
+    );
+
     const result =
       await ensureNpmProxyHost({
         domain: row.domain,

@@ -27,11 +27,20 @@ function sanitizeLogForClient(message: string) {
     );
 }
 
-function hasTerminalLog(
+function hasFinalLog(
   logs: Array<{ message: unknown }>,
+  status?: string,
 ) {
+  if (status === "Succeeded") {
+    return logs.some((log) =>
+      /\[(NPM|NPM_START|NPM_SKIP|NPM_ERROR)\]/.test(
+        String(log.message),
+      ),
+    );
+  }
+
   return logs.some((log) =>
-    /\[(SUCCESS|FAILURE|NPM|NPM_ERROR)\]|Aplikasi Laravel berhasil dijalankan|Deployment gagal pada tahap/.test(
+    /\[FAILURE\]|Deployment gagal pada tahap/.test(
       String(log.message),
     ),
   );
@@ -98,7 +107,7 @@ export async function GET(
 
     if (
       !terminalStatus ||
-      hasTerminalLog(rows) ||
+      hasFinalLog(rows, deployment?.status) ||
       attempt === 2
     ) {
       break;
