@@ -423,41 +423,72 @@ function OverviewTab({ project, notify }: { project: Project; notify: (message: 
   </aside></div>;
 }
 
-function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId: string }) {
+function LogPanel({
+  compact = false,
+  projectId,
+  deploymentId,
+}: {
+  compact?: boolean;
+  projectId: string;
+  deploymentId?: string | null;
+}) {
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [logs, setLogs] = useState<DeploymentLog[]>([]);
   const [loading, setLoading] = useState(true);
   const terminalRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
-    const historyResponse = await fetch(`/api/projects/${projectId}/deployments`);
+    const historyResponse = await fetch(
+      `/api/projects/${projectId}/deployments`,
+    );
 
     if (!historyResponse.ok) {
+      setLoading(false);
       return null;
     }
 
     const history = await historyResponse.json();
-    const latest = history.deployments?.[0] as Deployment | undefined;
+    const deployments =
+      (history.deployments ?? []) as Deployment[];
 
-    if (!latest) {
+    const target = deploymentId
+      ? deployments.find(
+          (item) => item.id === deploymentId,
+        )
+      : deployments[0];
+
+    if (!target) {
       setDeployment(null);
       setLogs([]);
       setLoading(false);
       return null;
     }
 
-    setDeployment(latest);
+    setDeployment(target);
 
-    const logResponse = await fetch(`/api/deployments/${latest.id}/logs`);
+    const logResponse = await fetch(
+      `/api/deployments/${target.id}/logs`,
+    );
 
     if (logResponse.ok) {
       const output = await logResponse.json();
       setLogs(output.logs ?? []);
+
+      if (output.deployment) {
+        const syncedDeployment = {
+          ...target,
+          ...output.deployment,
+        };
+
+        setDeployment(syncedDeployment);
+        setLoading(false);
+        return syncedDeployment;
+      }
     }
 
     setLoading(false);
-    return latest;
-  }, [projectId]);
+    return target;
+  }, [deploymentId, projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -468,13 +499,13 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
         return;
       }
 
-      const latest = await load();
+      const current = await load();
 
       if (
-        latest &&
+        current &&
         (
-          latest.status === "Succeeded" ||
-          latest.status === "Failed"
+          current.status === "Succeeded" ||
+          current.status === "Failed"
         )
       ) {
         if (interval) {
@@ -515,18 +546,28 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
     deployment?.status === "WaitingExecutor";
 
   return (
-    <section className={`panel log-panel ${compact ? "compact" : ""}`}>
+    <section
+      className={`panel log-panel ${
+        compact ? "compact" : ""
+      }`}
+    >
       <div className="panel-head dark">
         <div>
           <h2>Log deployment</h2>
           <p>
             {deployment
-              ? deployment.archiveName
+              ? `${deployment.action ?? "Deploy"} · ${deployment.archiveName}`
               : "Belum ada deployment"}
           </p>
         </div>
 
-        <span className={deployment?.status === "Failed" ? "error" : ""}>
+        <span
+          className={
+            deployment?.status === "Failed"
+              ? "error"
+              : ""
+          }
+        >
           <i />
           {deployment?.status ?? "Menunggu"}
           {isRunning ? " • LIVE" : ""}
@@ -545,7 +586,9 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
           logs.map((log) => (
             <p key={log.id}>
               <time>
-                {new Date(log.createdAt).toLocaleTimeString(
+                {new Date(
+                  log.createdAt,
+                ).toLocaleTimeString(
                   "id-ID",
                   {
                     hour: "2-digit",
@@ -561,9 +604,7 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
                     ? "success"
                     : log.level === "error"
                       ? "error"
-                      : log.level === "warning"
-                        ? "done"
-                        : "done"
+                      : "done"
                 }
               >
                 {log.level.toUpperCase()}
@@ -575,15 +616,18 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
         ) : (
           <p>
             <code>
-              Belum ada log deployment untuk project ini.
+              Belum ada log deployment untuk release ini.
             </code>
           </p>
         )}
 
-        {deployment?.status === "Failed" && deployment.error ? (
+        {deployment?.status === "Failed" &&
+        deployment.error ? (
           <p>
             <time>ERROR</time>
-            <span className="error">FAILED</span>
+            <span className="error">
+              FAILED
+            </span>
             <code>{deployment.error}</code>
           </p>
         ) : null}
@@ -591,8 +635,12 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
         {deployment?.status === "Succeeded" ? (
           <p>
             <time>DONE</time>
-            <span className="success">SUCCESS</span>
-            <code>Deployment selesai dengan sukses.</code>
+            <span className="success">
+              SUCCESS
+            </span>
+            <code>
+              Deployment selesai dengan sukses.
+            </code>
           </p>
         ) : null}
       </div>
@@ -607,13 +655,47 @@ function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId
   );
 }
 
-function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; refreshProjects: () => void }) {
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
+function DeploymentsTab({
+  projectId,
+  refreshProjects,
+}: {
+  projectId: string;
+  refreshProjects: () => void;
+}) {
+  const [deployments, setDeployments] =
+    useState<Deployment[]>([]);
+
+  const [
+    selectedDeploymentId,
+    setSelectedDeploymentId,
+  ] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const data = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json());
-    setDeployments(data.deployments ?? []);
-    return data.deployments ?? [];
+    const response = await fetch(
+      `/api/projects/${projectId}/deployments`,
+    );
+
+    const data = await response.json();
+    const nextDeployments =
+      (data.deployments ?? []) as Deployment[];
+
+    setDeployments(nextDeployments);
+
+    setSelectedDeploymentId((current) => {
+      if (
+        current &&
+        nextDeployments.some(
+          (deployment) =>
+            deployment.id === current,
+        )
+      ) {
+        return current;
+      }
+
+      return nextDeployments[0]?.id ?? null;
+    });
+
+    return nextDeployments;
   }, [projectId]);
 
   useEffect(() => {
@@ -661,10 +743,193 @@ function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; ref
     };
   }, [refresh, refreshProjects]);
 
-  const retry = async (deployment: Deployment) => { const response = await fetch(`/api/deployments/${deployment.id}/retry`, { method: "POST" }); await response.json(); if (!response.ok) return; await refresh(); };
-  const rollback = async () => { const response = await fetch(`/api/projects/${projectId}/rollback`, { method: "POST" }); if (response.ok) await refresh(); };
-  const duration = (deployment: Deployment) => deployment.startedAt && deployment.finishedAt ? `${Math.max(0, Math.round((new Date(deployment.finishedAt).getTime() - new Date(deployment.startedAt).getTime()) / 1000))} detik` : "-";
-  return <section className="panel table-panel"><div className="panel-head"><div><h2>Riwayat deployment</h2><p>Antrean, detail error, dan permintaan rollback.</p></div><button className="secondary-btn" onClick={() => void rollback()}><RotateCcw size={16} />Rollback</button></div><div className="data-table"><div className="table-row head"><span>Arsip</span><span>Status</span><span>Durasi</span><span>Waktu</span><span /></div>{deployments.length ? deployments.map((deployment) => <div className="table-row" key={deployment.id}><span><strong>{deployment.archiveName}</strong><small className="deployment-action">{deployment.action ?? "Deploy"} · {deployment.executor}</small>{deployment.error && <small className="deployment-error">{deployment.error}</small>}</span><span className={deployment.status === "WaitingExecutor" ? "status status-deploying" : deployment.status === "Failed" ? "status status-stopped" : "success-label"}>{deployment.status === "WaitingExecutor" ? "Menunggu executor" : deployment.status}</span><span>{duration(deployment)}</span><span>{relativeTime(deployment.createdAt)}</span>{["WaitingExecutor", "Failed"].includes(deployment.status) ? <button className="restore-btn" onClick={() => void retry(deployment)}><RefreshCw size={15} />Coba ulang</button> : <span />}</div>) : <div className="empty-state"><FileArchive size={26} /><h3>Belum ada deployment</h3><p>Unggah ZIP lalu pilih Deploy ulang.</p></div>}</div></section>;
+  const retry = async (
+    deployment: Deployment,
+  ) => {
+    const response = await fetch(
+      `/api/deployments/${deployment.id}/retry`,
+      {
+        method: "POST",
+      },
+    );
+
+    await response.json();
+
+    if (!response.ok) {
+      return;
+    }
+
+    await refresh();
+  };
+
+  const rollback = async () => {
+    const response = await fetch(
+      `/api/projects/${projectId}/rollback`,
+      {
+        method: "POST",
+      },
+    );
+
+    if (response.ok) {
+      await refresh();
+    }
+  };
+
+  const duration = (
+    deployment: Deployment,
+  ) =>
+    deployment.startedAt &&
+    deployment.finishedAt
+      ? `${Math.max(
+          0,
+          Math.round(
+            (
+              new Date(
+                deployment.finishedAt,
+              ).getTime() -
+              new Date(
+                deployment.startedAt,
+              ).getTime()
+            ) / 1000,
+          ),
+        )} detik`
+      : "-";
+
+  return (
+    <>
+      <section className="panel table-panel">
+        <div className="panel-head">
+          <div>
+            <h2>Riwayat deployment</h2>
+            <p>
+              Pilih deployment untuk melihat log
+              lengkap tanpa akses VPS.
+            </p>
+          </div>
+
+          <button
+            className="secondary-btn"
+            onClick={() => void rollback()}
+          >
+            <RotateCcw size={16} />
+            Rollback
+          </button>
+        </div>
+
+        <div className="data-table">
+          <div className="table-row head">
+            <span>Arsip</span>
+            <span>Status</span>
+            <span>Durasi</span>
+            <span>Waktu</span>
+            <span />
+          </div>
+
+          {deployments.length ? (
+            deployments.map((deployment) => (
+              <div
+                className="table-row"
+                key={deployment.id}
+              >
+                <span>
+                  <strong>
+                    {deployment.archiveName}
+                  </strong>
+
+                  <small className="deployment-action">
+                    {deployment.action ?? "Deploy"}
+                    {" · "}
+                    {deployment.executor}
+                  </small>
+
+                  {deployment.error && (
+                    <small className="deployment-error">
+                      {deployment.error}
+                    </small>
+                  )}
+                </span>
+
+                <span
+                  className={
+                    deployment.status ===
+                    "WaitingExecutor"
+                      ? "status status-deploying"
+                      : deployment.status ===
+                          "Failed"
+                        ? "status status-stopped"
+                        : "success-label"
+                  }
+                >
+                  {deployment.status ===
+                  "WaitingExecutor"
+                    ? "Menunggu executor"
+                    : deployment.status}
+                </span>
+
+                <span>
+                  {duration(deployment)}
+                </span>
+
+                <span>
+                  {relativeTime(
+                    deployment.createdAt,
+                  )}
+                </span>
+
+                <span>
+                  <button
+                    className="restore-btn"
+                    onClick={() =>
+                      setSelectedDeploymentId(
+                        deployment.id,
+                      )
+                    }
+                  >
+                    <TerminalSquare size={15} />
+                    Lihat log
+                  </button>
+
+                  {[
+                    "WaitingExecutor",
+                    "Failed",
+                  ].includes(
+                    deployment.status,
+                  ) && (
+                    <button
+                      className="restore-btn"
+                      onClick={() =>
+                        void retry(deployment)
+                      }
+                    >
+                      <RefreshCw size={15} />
+                      Coba ulang
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">
+              <FileArchive size={26} />
+              <h3>
+                Belum ada deployment
+              </h3>
+              <p>
+                Unggah ZIP lalu pilih Deploy ulang.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {selectedDeploymentId && (
+        <LogPanel
+          projectId={projectId}
+          deploymentId={selectedDeploymentId}
+        />
+      )}
+    </>
+  );
 }
 
 function EnvironmentTab({ project, notify, canOperate }: { project: Project; notify: (m: string) => void; canOperate: boolean }) {

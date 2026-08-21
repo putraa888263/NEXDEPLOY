@@ -3,9 +3,43 @@ import { decryptEnvironmentValue } from "./environment";
 
 type ProjectForDeployment = { id: string; name: string; archive_key: string; archive_name: string; framework: string };
 
-async function writeLog(deploymentId: string, level: "info" | "success" | "warning" | "error", message: string) {
-  await getD1().prepare("INSERT INTO deployment_logs (id, deployment_id, level, message, created_at) VALUES (?, ?, ?, ?, ?)")
-    .bind(crypto.randomUUID(), deploymentId, level, message, new Date().toISOString()).run();
+function sanitizeDeploymentLog(message: string) {
+  return message
+    .replace(
+      /\b(authorization)\s*:\s*bearer\s+[^\s,;]+/gi,
+      "$1: Bearer [REDACTED]",
+    )
+    .replace(
+      /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+      "Bearer [REDACTED]",
+    )
+    .replace(
+      /\b(APP_KEY|DB_PASSWORD|DB_USERNAME|DATABASE_URL|REDIS_PASSWORD|MAIL_PASSWORD|API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/gi,
+      "$1=[REDACTED]",
+    )
+    .replace(
+      /("?(?:password|token|secret|api[_-]?key|app[_-]?key|db[_-]?password)"?\s*:\s*)("[^"]*"|'[^']*'|[^,\s}]+)/gi,
+      '$1"[REDACTED]"',
+    );
+}
+
+async function writeLog(
+  deploymentId: string,
+  level: "info" | "success" | "warning" | "error",
+  message: string,
+) {
+  await getD1()
+    .prepare(
+      "INSERT INTO deployment_logs (id, deployment_id, level, message, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(
+      crypto.randomUUID(),
+      deploymentId,
+      level,
+      sanitizeDeploymentLog(message),
+      new Date().toISOString(),
+    )
+    .run();
 }
 
 type ExecutorLog = { at?: string; level?: "info" | "success" | "warning" | "error"; message?: string };
@@ -80,6 +114,7 @@ export async function syncExecutorDeployment(deploymentId: string) {
       await jobResponse.json() as {
         job?: {
           status?: string;
+          finishedAt?: string;
         };
       };
 
@@ -90,10 +125,16 @@ export async function syncExecutorDeployment(deploymentId: string) {
 
     const executorStatus =
       job.job?.status;
-  const finishedAt = job.job?.finishedAt;
+
+    const finishedAt =
+      job.job?.finishedAt;
 
     const status =
-      executorStatus === "succeeded" || (executorStatus === "running" && finishedAt)
+      executorStatus === "succeeded" ||
+      (
+        executorStatus === "running" &&
+        finishedAt
+      )
         ? "Succeeded"
         : executorStatus === "failed"
           ? "Failed"

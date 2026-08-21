@@ -273,6 +273,30 @@ async function save(job) {
   );
 }
 
+function sanitizeLogMessage(
+  message,
+) {
+  return String(
+    message,
+  )
+    .replace(
+      /\b(authorization)\s*:\s*bearer\s+[^\s,;]+/gi,
+      "$1: Bearer [REDACTED]",
+    )
+    .replace(
+      /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+      "Bearer [REDACTED]",
+    )
+    .replace(
+      /\b(APP_KEY|DB_PASSWORD|DB_USERNAME|DATABASE_URL|REDIS_PASSWORD|MAIL_PASSWORD|API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/gi,
+      "$1=[REDACTED]",
+    )
+    .replace(
+      /("?(?:password|token|secret|api[_-]?key|app[_-]?key|db[_-]?password)"?\s*:\s*)("[^"]*"|'[^']*'|[^,\s}]+)/gi,
+      '$1"[REDACTED]"',
+    );
+}
+
 async function load(id) {
   if (
     jobs.has(id)
@@ -311,7 +335,10 @@ async function log(
     at:
       new Date().toISOString(),
     level,
-    message,
+    message:
+      sanitizeLogMessage(
+        message,
+      ),
   });
 
   await save(job);
@@ -611,10 +638,12 @@ async function processArchive(
         : job.status;
 
     const sanitized =
-      error instanceof
-      Error
-        ? error.message
-        : "Deployment Laravel gagal.";
+      sanitizeLogMessage(
+        error instanceof
+        Error
+          ? error.message
+          : "Deployment Laravel gagal.",
+      );
 
     console.log(
       `DEPLOY_FAILED project=${job.payload.projectId} job=${job.id} state=${stage} error=${JSON.stringify(
@@ -637,7 +666,7 @@ async function processArchive(
     await log(
       job,
       "error",
-      `Deployment gagal pada tahap ${stage}: ${sanitized}`,
+      `[FAILURE] Deployment gagal pada tahap ${stage}: ${sanitized}`,
     );
   }
 }
@@ -733,11 +762,23 @@ async function deployLaravelRelease(
       dbConfig,
     );
 
+  await log(
+    job,
+    "success",
+    `[DATABASE] PostgreSQL project siap: ${dbMetadata.database}.`,
+  );
+
   const userEnvironment =
     await loadProjectEnvironment(
       projectsDir,
       projectId,
     );
+
+  await log(
+    job,
+    "info",
+    `[ENVIRONMENT] ${Object.keys(userEnvironment).length} variable environment project dimuat.`,
+  );
 
   const dbOverrides = {
     DB_CONNECTION:
@@ -771,6 +812,12 @@ async function deployLaravelRelease(
 
   await log(
     job,
+    "success",
+    "[ENVIRONMENT] Runtime environment Laravel berhasil disiapkan.",
+  );
+
+  await log(
+    job,
     "info",
     "Menghapus cache package Laravel lama.",
   );
@@ -785,7 +832,7 @@ async function deployLaravelRelease(
     await log(
       job,
       "info",
-      "Menjalankan composer install (--no-dev).",
+      "[COMPOSER] Menjalankan composer install (--no-dev).",
     );
 
     try {
@@ -816,7 +863,7 @@ async function deployLaravelRelease(
     await log(
       job,
       "success",
-      "Composer install selesai.",
+      "[COMPOSER] Composer install selesai.",
     );
 
     await log(
@@ -847,7 +894,7 @@ async function deployLaravelRelease(
     await log(
       job,
       "info",
-      "Membuat backup PostgreSQL sebelum migrasi.",
+      "[BACKUP] Membuat backup PostgreSQL sebelum migrasi.",
     );
 
     try {
@@ -864,7 +911,7 @@ async function deployLaravelRelease(
       await log(
         job,
         "success",
-        `Backup PostgreSQL selesai: ${databaseBackup.fileName}`,
+        `[BACKUP] Backup PostgreSQL selesai: ${databaseBackup.fileName}`,
       );
     } catch (error) {
       throw new DeployStageError(
@@ -878,7 +925,7 @@ async function deployLaravelRelease(
     await log(
       job,
       "info",
-      "Menjalankan migrasi database Laravel.",
+      "[MIGRATION] Menjalankan migrasi database Laravel.",
     );
 
     try {
@@ -889,7 +936,7 @@ async function deployLaravelRelease(
         volumes: [`${projectsVolume}:${projectsDir}`],
         command: ["php", "artisan", "migrate", "--force"],
       });
-      await log(job, "success", "Migrasi database Laravel selesai.");
+      await log(job, "success", "[MIGRATION] Migrasi database Laravel selesai.");
     } catch (e) {
       throw new DeployStageError("preparing", summarizeFailure(e));
     }
@@ -915,7 +962,7 @@ async function deployLaravelRelease(
     await log(
       job,
       "info",
-      "package.json ditemukan, menjalankan frontend build.",
+      "[FRONTEND] package.json ditemukan, menjalankan frontend build.",
     );
 
     try {
@@ -947,15 +994,21 @@ async function deployLaravelRelease(
     await log(
       job,
       "success",
-      "Build frontend selesai.",
+      "[FRONTEND] Build frontend selesai.",
     );
   } else {
     await log(
       job,
       "info",
-      "package.json tidak ditemukan, melewati build frontend.",
+      "[FRONTEND] package.json tidak ditemukan, melewati build frontend.",
     );
   }
+
+  await log(
+    job,
+    "info",
+    `[IMAGE] Membangun Docker image ${image}.`,
+  );
 
   try {
     await buildImage({
@@ -982,7 +1035,7 @@ async function deployLaravelRelease(
   await log(
     job,
     "success",
-    `Image ${image} berhasil dibuild.`,
+    `[IMAGE] Image ${image} berhasil dibuild.`,
   );
 
   await transition(
@@ -1060,6 +1113,12 @@ const stablePortPath = join(
   }
 
   let hostPort = candidateHostPort;
+
+  await log(
+    job,
+    "info",
+    `[CANDIDATE] Menjalankan candidate container pada host port ${candidateHostPort}.`,
+  );
 
   try {
     await ensureNetwork(
@@ -1160,7 +1219,7 @@ const stablePortPath = join(
   await log(
     job,
     "success",
-    "Health check HTTP berhasil.",
+    "[HEALTHCHECK] Health check HTTP berhasil.",
   );
 
   // Candidate sudah sehat. Lakukan cutover ke stable port project.
@@ -1168,7 +1227,7 @@ const stablePortPath = join(
     await log(
       job,
       "info",
-      `Candidate sehat. Melakukan cutover dari temporary port ${candidateHostPort} ke stable port ${stableHostPort}.`,
+      `[CUTOVER] Candidate sehat. Melakukan cutover dari temporary port ${candidateHostPort} ke stable port ${stableHostPort}.`,
     );
 
     try {
@@ -1194,6 +1253,12 @@ const stablePortPath = join(
         labels,
         command: buildEntrypointCommand(),
       });
+
+      await log(
+        job,
+        "info",
+        `[HEALTHCHECK] Memverifikasi release pada stable port ${stableHostPort}.`,
+      );
 
       const finalHealthy = await waitForHealthy(
         candidateContainer,
@@ -1224,7 +1289,7 @@ const stablePortPath = join(
       await log(
         job,
         "success",
-        `Release baru aktif pada stable host port ${stableHostPort}.`,
+        `[CUTOVER] Release baru aktif pada stable host port ${stableHostPort}.`,
       );
     } catch (error) {
       if (error instanceof DeployStageError) {
@@ -1252,12 +1317,6 @@ const stablePortPath = join(
     hostPort = stableHostPort;
   }
 
-  await log(
-    job,
-    "info",
-    "Menjalankan Laravel queue worker dan scheduler.",
-  );
-
   const workerContainer =
     `nexdeploy-${slug}-worker`;
 
@@ -1270,6 +1329,12 @@ const stablePortPath = join(
   ];
 
   try {
+    await log(
+      job,
+      "info",
+      "[WORKER] Menjalankan Laravel queue worker.",
+    );
+
     await startBackgroundContainer({
       name:
         workerContainer,
@@ -1293,6 +1358,18 @@ const stablePortPath = join(
         buildQueueWorkerCommand(),
     });
 
+    await log(
+      job,
+      "success",
+      `[WORKER] Queue worker aktif: ${workerContainer}.`,
+    );
+
+    await log(
+      job,
+      "info",
+      "[SCHEDULER] Menjalankan Laravel scheduler.",
+    );
+
     await startBackgroundContainer({
       name:
         schedulerContainer,
@@ -1315,6 +1392,12 @@ const stablePortPath = join(
       command:
         buildSchedulerCommand(),
     });
+
+    await log(
+      job,
+      "success",
+      `[SCHEDULER] Scheduler aktif: ${schedulerContainer}.`,
+    );
   } catch (error) {
     await removeContainerIfExists(
       workerContainer,
@@ -1355,7 +1438,7 @@ const stablePortPath = join(
   await log(
     job,
     "success",
-    "Aplikasi Laravel berhasil dijalankan.",
+    `[SUCCESS] Deployment Laravel selesai. Release aktif pada stable host port ${stableHostPort}.`,
   );
 
   await save(job);
