@@ -56,21 +56,49 @@ Force SSL: ON
 HTTP/2 Support: ON
 ```
 
-Proxy Host untuk project Laravel yang sudah deploy:
+## Proxy Host otomatis untuk project
 
-1. Ambil stable host port dari log panel atau executor, misalnya `20000`.
-2. Buat Proxy Host di NPM:
+Setelah NPM terhubung, NEXDEPLOY dapat membuat atau memperbarui Proxy Host project secara otomatis setelah deployment sukses.
+
+Syarat satu kali:
+
+1. DNS sudah mengarah ke VPS. Untuk subdomain project otomatis, paling praktis gunakan wildcard:
+
+```text
+*.neversdigital.cloud  A  IP_VPS
+```
+
+2. Di Pengaturan panel, isi:
+
+```text
+Base domain: neversdigital.cloud
+URL Nginx Proxy Manager: http://IP-VPS:81
+Email SSL: email Bos untuk SSL
+```
+
+3. Di `.env` VPS, isi akun NPM yang boleh membuat Proxy Host:
+
+```env
+NPM_IDENTITY=email-login-npm
+NPM_SECRET=password-login-npm
+NPM_FORWARD_HOST=IP_VPS
+NPM_ACCESS_LIST_ID=0
+NPM_CERTIFICATE_ID=0
+```
+
+`NPM_FORWARD_HOST` adalah alamat yang akan dipakai NPM untuk meneruskan trafik ke stable port project, misalnya `IP_VPS:20000`.
+
+Jika Bos sudah punya wildcard certificate di NPM untuk `*.neversdigital.cloud`, isi `NPM_CERTIFICATE_ID` dengan ID certificate tersebut agar Proxy Host otomatis memakai SSL. Jika `NPM_CERTIFICATE_ID=0`, Proxy Host tetap dibuat otomatis tetapi tanpa SSL paksa.
+
+Setelah deployment Laravel sukses, panel akan membuat atau memperbarui Proxy Host:
 
 ```text
 Domain Names: nama-project.domainanda.com
 Scheme: http
-Forward Hostname / IP: host.docker.internal
-Forward Port: 20000
+Forward Hostname / IP: nilai NPM_FORWARD_HOST
+Forward Port: stable host port deployment
 Block Common Exploits: ON
 Websockets Support: ON
-SSL: Request a new SSL Certificate
-Force SSL: ON
-HTTP/2 Support: ON
 ```
 
 Jangan expose atau proxy service `executor`. Executor hanya untuk komunikasi internal panel.

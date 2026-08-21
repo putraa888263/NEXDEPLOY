@@ -1,5 +1,7 @@
 import { getD1, getUploads } from "@/db/bootstrap";
+import { env } from "cloudflare:workers";
 import { decryptEnvironmentValue } from "./environment";
+import { ensureNpmProxyHost } from "./npm";
 
 type ProjectForDeployment = { id: string; name: string; archive_key: string; archive_name: string; framework: string };
 
@@ -40,6 +42,37 @@ async function writeLog(
       new Date().toISOString(),
     )
     .run();
+}
+
+async function writeLogOnce(
+  deploymentId: string,
+  level: "info" | "success" | "warning" | "error",
+  marker: string,
+  message: string,
+) {
+  const exists = await getD1()
+    .prepare(
+      `SELECT id
+       FROM deployment_logs
+       WHERE deployment_id = ?
+       AND message LIKE ?
+       LIMIT 1`,
+    )
+    .bind(
+      deploymentId,
+      `${marker}%`,
+    )
+    .first();
+
+  if (exists) {
+    return;
+  }
+
+  await writeLog(
+    deploymentId,
+    level,
+    `${marker} ${message}`,
+  );
 }
 
 type ExecutorLog = { at?: string; level?: "info" | "success" | "warning" | "error"; message?: string };
@@ -115,6 +148,7 @@ export async function syncExecutorDeployment(deploymentId: string) {
         job?: {
           status?: string;
           finishedAt?: string;
+          hostPort?: number;
         };
       };
 
@@ -218,6 +252,14 @@ export async function syncExecutorDeployment(deploymentId: string) {
             deployment.project_id,
           )
           .run();
+
+        if (job.job?.hostPort) {
+          await syncProjectProxyHost(
+            deploymentId,
+            deployment.project_id,
+            job.job.hostPort,
+          );
+        }
       } else if (status === "Failed") {
         await db
           .prepare(
@@ -292,6 +334,85 @@ export async function syncExecutorDeployment(deploymentId: string) {
      * Executor mungkin sementara offline.
      * Pertahankan state terakhir yang diketahui.
      */
+  }
+}
+
+async function syncProjectProxyHost(
+  deploymentId: string,
+  projectId: string,
+  hostPort: number,
+) {
+  const db = getD1();
+
+  const row = await db
+    .prepare(
+      `SELECT
+        projects.domain,
+        settings.npm_url AS npmUrl,
+        settings.server_ip AS serverIp
+       FROM projects
+       CROSS JOIN settings
+       WHERE projects.id = ?
+       AND settings.id = 1`,
+    )
+    .bind(projectId)
+    .first<{
+      domain: string;
+      npmUrl: string;
+      serverIp: string;
+    }>();
+
+  if (!row?.domain || !row.npmUrl) {
+    return;
+  }
+
+  const forwardHost =
+    ((env as unknown as { NPM_FORWARD_HOST?: string })
+      .NPM_FORWARD_HOST ??
+      row.serverIp).trim();
+
+  if (!forwardHost) {
+    return;
+  }
+
+  try {
+    const result =
+      await ensureNpmProxyHost({
+        domain: row.domain,
+        forwardHost,
+        forwardPort: hostPort,
+        npmUrl: row.npmUrl,
+      });
+
+    if (result.skipped) {
+      await writeLogOnce(
+        deploymentId,
+        "warning",
+        "[NPM_SKIP]",
+        "Proxy Host otomatis dilewati karena NPM_IDENTITY/NPM_SECRET belum dikonfigurasi.",
+      );
+
+      return;
+    }
+
+    await writeLogOnce(
+      deploymentId,
+      "success",
+      "[NPM]",
+      `Proxy Host ${row.domain} diarahkan ke ${forwardHost}:${hostPort}${result.ssl ? " dengan SSL." : "."}`,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "NPM tidak dapat dikonfigurasi.";
+
+    await writeLogOnce(
+      deploymentId,
+      "warning",
+      "[NPM_ERROR]",
+      `Deployment berhasil, tetapi Proxy Host otomatis gagal: ${message}`,
+    );
   }
 }
 
