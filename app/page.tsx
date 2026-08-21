@@ -36,7 +36,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "dashboard" | "projects" | "activity" | "backups" | "settings";
 type ProjectStatus = "Healthy" | "Deploying" | "Stopped";
@@ -426,8 +426,185 @@ function OverviewTab({ project, notify }: { project: Project; notify: (message: 
 function LogPanel({ compact = false, projectId }: { compact?: boolean; projectId: string }) {
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [logs, setLogs] = useState<DeploymentLog[]>([]);
-  useEffect(() => { void (async () => { const history = await fetch(`/api/projects/${projectId}/deployments`).then((response) => response.json()); const latest = history.deployments?.[0] as Deployment | undefined; if (!latest) return; setDeployment(latest); const output = await fetch(`/api/deployments/${latest.id}/logs`).then((response) => response.json()); setLogs(output.logs ?? []); })(); }, [projectId]);
-  return <section className={`panel log-panel ${compact ? "compact" : ""}`}><div className="panel-head dark"><div><h2>Log deployment</h2><p>{deployment ? deployment.archiveName : "Belum ada deployment"}</p></div><span><i />{deployment?.status ?? "Menunggu"}</span></div><div className="terminal">{logs.length ? logs.map((log) => <p key={log.id}><time>{new Date(log.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span className={log.level === "success" ? "success" : log.level === "warning" ? "done" : log.level === "error" ? "error" : "done"}>{log.level.toUpperCase()}</span><code>{log.message}</code></p>) : <p><code>Belum ada log deployment untuk project ini.</code></p>}</div>{compact && <button className="terminal-footer">Lihat log lengkap <ExternalLink size={14} /></button>}</section>;
+  const [loading, setLoading] = useState(true);
+  const terminalRef = useRef<HTMLDivElement | null>(null);
+
+  const load = useCallback(async () => {
+    const historyResponse = await fetch(`/api/projects/${projectId}/deployments`);
+
+    if (!historyResponse.ok) {
+      return null;
+    }
+
+    const history = await historyResponse.json();
+    const latest = history.deployments?.[0] as Deployment | undefined;
+
+    if (!latest) {
+      setDeployment(null);
+      setLogs([]);
+      setLoading(false);
+      return null;
+    }
+
+    setDeployment(latest);
+
+    const logResponse = await fetch(`/api/deployments/${latest.id}/logs`);
+
+    if (logResponse.ok) {
+      const output = await logResponse.json();
+      setLogs(output.logs ?? []);
+    }
+
+    setLoading(false);
+    return latest;
+  }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const latest = await load();
+
+      if (
+        latest &&
+        (
+          latest.status === "Succeeded" ||
+          latest.status === "Failed"
+        )
+      ) {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }
+    };
+
+    void poll();
+
+    interval = setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [load]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+
+    if (!terminal) {
+      return;
+    }
+
+    terminal.scrollTop = terminal.scrollHeight;
+  }, [logs]);
+
+  const isRunning =
+    deployment?.status === "Queued" ||
+    deployment?.status === "Running" ||
+    deployment?.status === "WaitingExecutor";
+
+  return (
+    <section className={`panel log-panel ${compact ? "compact" : ""}`}>
+      <div className="panel-head dark">
+        <div>
+          <h2>Log deployment</h2>
+          <p>
+            {deployment
+              ? deployment.archiveName
+              : "Belum ada deployment"}
+          </p>
+        </div>
+
+        <span className={deployment?.status === "Failed" ? "error" : ""}>
+          <i />
+          {deployment?.status ?? "Menunggu"}
+          {isRunning ? " • LIVE" : ""}
+        </span>
+      </div>
+
+      <div
+        className="terminal"
+        ref={terminalRef}
+      >
+        {loading ? (
+          <p>
+            <code>Memuat log deployment...</code>
+          </p>
+        ) : logs.length ? (
+          logs.map((log) => (
+            <p key={log.id}>
+              <time>
+                {new Date(log.createdAt).toLocaleTimeString(
+                  "id-ID",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  },
+                )}
+              </time>
+
+              <span
+                className={
+                  log.level === "success"
+                    ? "success"
+                    : log.level === "error"
+                      ? "error"
+                      : log.level === "warning"
+                        ? "done"
+                        : "done"
+                }
+              >
+                {log.level.toUpperCase()}
+              </span>
+
+              <code>{log.message}</code>
+            </p>
+          ))
+        ) : (
+          <p>
+            <code>
+              Belum ada log deployment untuk project ini.
+            </code>
+          </p>
+        )}
+
+        {deployment?.status === "Failed" && deployment.error ? (
+          <p>
+            <time>ERROR</time>
+            <span className="error">FAILED</span>
+            <code>{deployment.error}</code>
+          </p>
+        ) : null}
+
+        {deployment?.status === "Succeeded" ? (
+          <p>
+            <time>DONE</time>
+            <span className="success">SUCCESS</span>
+            <code>Deployment selesai dengan sukses.</code>
+          </p>
+        ) : null}
+      </div>
+
+      {compact && (
+        <button className="terminal-footer">
+          Lihat log lengkap
+          <ExternalLink size={14} />
+        </button>
+      )}
+    </section>
+  );
 }
 
 function DeploymentsTab({ projectId, refreshProjects }: { projectId: string; refreshProjects: () => void }) {
