@@ -192,9 +192,15 @@ async function ensureNpmCertificate(
       },
     );
 
-  if (reachability[domain] !== "ok") {
+  const challengeStatus =
+    reachability[domain] ?? "tidak ada respons";
+
+  if (
+    challengeStatus !== "ok" &&
+    challengeStatus !== "404"
+  ) {
     throw new Error(
-      `HTTP challenge NPM untuk ${domain} gagal: ${reachability[domain] ?? "tidak ada respons"}.`,
+      `HTTP challenge NPM untuk ${domain} gagal: ${challengeStatus}.`,
     );
   }
 
