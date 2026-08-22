@@ -101,8 +101,8 @@ export async function POST(request: Request) {
     if (body.approved !== true || !/^NEXA-[A-F0-9]{12}$/.test(proposalId)) {
       return NextResponse.json({ error: "approved_typed_proposal_required" }, { status: 403 });
     }
-    const project = await getD1().prepare("SELECT id,name,framework,archive_key,archive_name FROM projects WHERE id=?")
-      .bind(projectId).first<{ id: string; name: string; framework: string; archive_key: string | null; archive_name: string | null }>();
+    const project = await getD1().prepare("SELECT id,name,framework,database_type AS database,archive_key,archive_name FROM projects WHERE id=?")
+      .bind(projectId).first<{ id: string; name: string; framework: string; database: "MariaDB" | "PostgreSQL" | "Tanpa database"; archive_key: string | null; archive_name: string | null }>();
     if (!project) return NextResponse.json({ error: "project_not_found" }, { status: 404 });
 
     let archiveKey = project.archive_key;
@@ -130,7 +130,7 @@ export async function POST(request: Request) {
       "INSERT INTO deployments(id,project_id,status,requested_by,archive_key,archive_name,executor,action,source_deployment_id,created_at) VALUES(?,?,'Queued',?,?,?,'local-worker',?,?,?)",
     ).bind(id, projectId, String(body.requester_ref ?? "service:nexa"), archiveKey, archiveName, action, sourceDeploymentId, now).run();
 
-    await processDeployment(id, { id: projectId, name: project.name, archive_key: archiveKey, archive_name: archiveName, framework: project.framework });
+    await processDeployment(id, { id: projectId, name: project.name, archive_key: archiveKey, archive_name: archiveName, framework: project.framework, database: project.database });
     await syncExecutorDeployment(id);
     const deployment = await getD1().prepare(
       "SELECT id,status,action,source_deployment_id AS sourceDeploymentId,error,created_at AS createdAt,started_at AS startedAt,finished_at AS finishedAt FROM deployments WHERE id=?",

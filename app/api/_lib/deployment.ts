@@ -9,6 +9,7 @@ type ProjectForDeployment = {
   archive_key: string;
   archive_name: string;
   framework: string;
+  database: "MariaDB" | "PostgreSQL" | "Tanpa database";
   domain?: string | null;
 };
 
@@ -632,6 +633,7 @@ export async function processDeployment(deploymentId: string, project: ProjectFo
       body: JSON.stringify({
         projectId: project.id,
         projectName: project.name,
+          databaseType: project.database,
         archiveName: project.archive_name,
         framework: project.framework,
         environment: deploymentEnvironment,

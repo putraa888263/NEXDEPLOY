@@ -652,3 +652,58 @@ exit(1);
     return false;
   }
 }
+
+export async function listImagesByLabel(
+  resourceLabel,
+) {
+  const output =
+    await runDocker([
+      "image",
+      "ls",
+      "--filter",
+      `label=${resourceLabel}`,
+      "--format",
+      "{{.Repository}}:{{.Tag}}",
+    ]);
+
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line &&
+        !line.endsWith(":<none>"),
+    );
+}
+
+export async function removeImagesByLabel(
+  resourceLabel,
+) {
+  const images =
+    await listImagesByLabel(
+      resourceLabel,
+    );
+
+  const removed = [];
+
+  for (const image of images) {
+    await runDocker(
+      [
+        "image",
+        "rm",
+        "-f",
+        image,
+      ],
+      {
+        allowExitCodes: [
+          0,
+          1,
+        ],
+      },
+    );
+
+    removed.push(image);
+  }
+
+  return removed;
+}

@@ -176,46 +176,146 @@ export default function Home() {
   }
 
   async function createProject(draft: ProjectDraft) {
-    const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
-    await response.json(); if (!response.ok) return notify(result.error || "Project gagal dibuat");
-    const upload = new FormData();
-    const selectedFile = draft.file;
-    if (!selectedFile) return notify("Project dibuat, tetapi ZIP belum dipilih.");
-    upload.set("archive", selectedFile);
-    let uploadResponse: Response;
-    let uploadResult: { error?: string; archive?: { name: string; size: number; detectedFramework: string } };
+    let response: Response;
+    let result: {
+      error?: string;
+      project?: Project;
+    };
+
     try {
-      uploadResponse = await fetch(`/api/projects/${result.project.id}/upload`, { method: "POST", body: upload });
-      uploadResult = await uploadResponse.json().catch(() => ({}));
+      response = await fetch("/api/projects", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: draft.name,
+          framework: draft.framework,
+          database: draft.database,
+        }),
+      });
+
+      result = await response.json().catch(() => ({}));
+    } catch {
+      return notify("Project gagal dibuat karena koneksi ke panel terputus.");
+    }
+
+    if (!response.ok) {
+      return notify(result.error || "Project gagal dibuat.");
+    }
+
+    if (!result.project) {
+      return notify("Project dibuat tetapi respons server tidak lengkap.");
+    }
+
+    const project = result.project;
+
+    // Project langsung masuk ke state agar tidak perlu refresh.
+    setProjects((items) => [
+      project,
+      ...items.filter((item) => item.id !== project.id),
+    ]);
+
+    const selectedFile = draft.file;
+
+    if (!selectedFile) {
+      setModalOpen(false);
+      setView("projects");
+      setSelected(project);
+      setDetailTab("overview");
+      return notify("Project berhasil dibuat. Silakan unggah ZIP dari detail project.");
+    }
+
+    const upload = new FormData();
+    upload.set("archive", selectedFile);
+
+    let uploadResponse: Response;
+    let uploadResult: {
+      error?: string;
+      archive?: {
+        name: string;
+        size: number;
+        detectedFramework: string;
+        [key: string]: unknown;
+      };
+    };
+
+    try {
+      uploadResponse = await fetch(
+        `/api/projects/${project.id}/upload`,
+        {
+          method: "POST",
+          body: upload,
+        },
+      );
+
+      uploadResult = await uploadResponse
+        .json()
+        .catch(() => ({}));
     } catch {
       setModalOpen(false);
       setView("projects");
-      return notify("Upload terputus. Pastikan ZIP maksimal 100 MB lalu coba unggah ulang dari detail project.");
+      setSelected(project);
+      setDetailTab("overview");
+
+      return notify(
+        "Project berhasil dibuat, tetapi upload ZIP terputus. Unggah ulang dari detail project.",
+      );
     }
+
     if (!uploadResponse.ok) {
-      setProjects((items) => [result.project, ...items]);
       setModalOpen(false);
       setView("projects");
-      return notify(`Project dibuat, tetapi ZIP ditolak: ${uploadResult.error || "Terjadi kesalahan pada server lokal."}`);
+      setSelected(project);
+      setDetailTab("overview");
+
+      return notify(
+        `Project berhasil dibuat, tetapi ZIP ditolak: ${
+          uploadResult.error ||
+          "Terjadi kesalahan pada server lokal."
+        }`,
+      );
     }
+
     if (!uploadResult.archive) {
-      setProjects((items) => [result.project, ...items]);
       setModalOpen(false);
       setView("projects");
-      return notify("Project dibuat, tetapi respons upload ZIP tidak lengkap. Unggah ulang dari detail project.");
+      setSelected(project);
+      setDetailTab("overview");
+
+      return notify(
+        "Project berhasil dibuat, tetapi respons upload ZIP tidak lengkap. Unggah ulang dari detail project.",
+      );
     }
-    const createdProject = {
-      ...result.project,
+
+    const createdProject: Project = {
+      ...project,
       archiveName: uploadResult.archive.name,
       archiveSize: uploadResult.archive.size,
-      archiveValidation: JSON.stringify(uploadResult.archive),
+      archiveValidation: JSON.stringify(
+        uploadResult.archive,
+      ),
       updatedAt: new Date().toISOString(),
     };
-    setProjects((items) => [createdProject, ...items]);
+
+    setProjects((items) => [
+      createdProject,
+      ...items.filter(
+        (item) => item.id !== createdProject.id,
+      ),
+    ]);
+
+    // Langsung buka project baru setelah create + upload selesai.
+    setSelected(createdProject);
+    setDetailTab("overview");
     setModalOpen(false);
     setView("projects");
-    notify(`${result.project.name} siap diproses. ZIP ${uploadResult.archive.detectedFramework} sudah tervalidasi.`);
+
+    notify(
+      `${createdProject.name} siap diproses. ZIP ${uploadResult.archive.detectedFramework} sudah tervalidasi.`,
+    );
   }
+
   async function uploadProjectArchive(project: Project, file: File) {
     const upload = new FormData();
     upload.set("archive", file);
@@ -236,6 +336,55 @@ export default function Home() {
     await loadPanel();
     setSelected((current) => current?.id === project.id ? { ...current, status: "Stopped" } : current);
     notify("Deployment diproses. Buka tab Deployment atau Log untuk melihat hasilnya.");
+  }
+
+  async function deleteProjectPermanently(
+    project: Project,
+  ): Promise<string | null> {
+    let response: Response;
+    let result: {
+      error?: string;
+      ok?: boolean;
+    };
+
+    try {
+      response = await fetch(
+        `/api/projects/${project.id}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      result = await response
+        .json()
+        .catch(() => ({}));
+    } catch {
+      return "Koneksi ke panel terputus saat menghapus project.";
+    }
+
+    if (!response.ok) {
+      return (
+        result.error ||
+        "Project gagal dihapus permanen."
+      );
+    }
+
+    setProjects((items) =>
+      items.filter(
+        (item) =>
+          item.id !== project.id,
+      ),
+    );
+
+    setSelected(null);
+    setDetailTab("overview");
+    setView("projects");
+
+    notify(
+      `${project.name} berhasil dihapus permanen beserta resource server dan domainnya.`,
+    );
+
+    return null;
   }
 
   async function login(email: string, password: string) {
@@ -308,7 +457,20 @@ export default function Home() {
 
         <div className="content-wrap">
           {selected ? (
-            <ProjectDetail project={selected} tab={detailTab} setTab={setDetailTab} onBack={() => setSelected(null)} onToggle={() => toggleProject(selected)} onDeploy={() => deployProject(selected)} onUpload={(file) => uploadProjectArchive(selected, file)} notify={notify} canOperate={canOperate} refreshProjects={loadPanel} />
+            <ProjectDetail
+              project={selected}
+              tab={detailTab}
+              setTab={setDetailTab}
+              onBack={() => setSelected(null)}
+              onToggle={() => toggleProject(selected)}
+              onDeploy={() => deployProject(selected)}
+              onUpload={(file) => uploadProjectArchive(selected, file)}
+              onDelete={() => deleteProjectPermanently(selected)}
+              notify={notify}
+              canOperate={canOperate}
+              isAdmin={isAdmin}
+              refreshProjects={loadPanel}
+            />
           ) : (
             <>
               <div className="page-heading">
@@ -391,24 +553,437 @@ function ProjectsView({ projects, query, setQuery, filter, setFilter, openProjec
   </div>;
 }
 
-function ProjectDetail({ project, tab, setTab, onBack, onToggle, onDeploy, onUpload, notify, canOperate, refreshProjects }: { project: Project; tab: string; setTab: (tab: string) => void; onBack: () => void; onToggle: () => void; onDeploy: () => Promise<void>; onUpload: (file: File) => Promise<void>; notify: (message: string) => void; canOperate: boolean; refreshProjects: () => void }) {
-  const tabs = [["overview", "Ringkasan"], ["deployments", "Deployment"], ["environment", "Environment"], ["resources", "Resource"], ["database", "Database"], ["backups", "Backup"], ["logs", "Log"]];
-  return <>
-    <button className="back-btn" onClick={onBack}><ChevronLeft size={18} />Kembali ke project</button>
-    <section className="project-hero">
-      <div className="project-identity"><ProjectMark project={project} /><div><div className="title-line"><h1>{project.name}</h1><StatusPill status={project.status} /></div><a href={`https://${project.domain}`} target="_blank" rel="noreferrer"><Globe2 size={15} />{project.domain}<ExternalLink size={13} /></a></div></div>
-      {canOperate && <div className="project-actions"><label className="secondary-btn upload-replace"><CloudUpload size={17} />Unggah ZIP<input type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUpload(file); event.currentTarget.value = ""; }} /></label><button className="secondary-btn" disabled={!project.archiveName} onClick={() => void onDeploy()}><RefreshCw size={17} />Deploy ulang</button><button className={project.status === "Stopped" ? "primary-btn" : "danger-btn"} onClick={onToggle}>{project.status === "Stopped" ? <Play size={17} /> : <Square size={16} fill="currentColor" />}{project.status === "Stopped" ? "Jalankan" : "Hentikan"}</button></div>}
-    </section>
-    <div className="detail-tabs">{tabs.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}</div>
-    {tab === "overview" && <OverviewTab project={project} notify={notify} />}
-    {tab === "deployments" && <DeploymentsTab projectId={project.id} refreshProjects={refreshProjects} />}
-    {tab === "environment" && <EnvironmentTab project={project} notify={notify} canOperate={canOperate} />}
-    {tab === "resources" && <ResourcesTab project={project} notify={notify} canOperate={canOperate} />}
-    {tab === "database" && <DatabaseTab project={project} notify={notify} canOperate={canOperate} />}
-    {tab === "backups" && <BackupsView compact project={project} notify={notify} canOperate={canOperate} />}
-    {tab === "logs" && <LogPanel projectId={project.id} />}
-  </>;
+function ProjectDetail({
+  project,
+  tab,
+  setTab,
+  onBack,
+  onToggle,
+  onDeploy,
+  onUpload,
+  onDelete,
+  notify,
+  canOperate,
+  isAdmin,
+  refreshProjects,
+}: {
+  project: Project;
+  tab: string;
+  setTab: (tab: string) => void;
+  onBack: () => void;
+  onToggle: () => void;
+  onDeploy: () => Promise<void>;
+  onUpload: (file: File) => Promise<void>;
+  onDelete: () => Promise<string | null>;
+  notify: (message: string) => void;
+  canOperate: boolean;
+  isAdmin: boolean;
+  refreshProjects: () => void;
+}) {
+  const tabs = [
+    ["overview", "Ringkasan"],
+    ["deployments", "Deployment"],
+    ["environment", "Environment"],
+    ["resources", "Resource"],
+    ["database", "Database"],
+    ["backups", "Backup"],
+    ["logs", "Log"],
+  ];
+
+  const [deleteOpen, setDeleteOpen] =
+    useState(false);
+
+  const [deleteConfirmation, setDeleteConfirmation] =
+    useState("");
+
+  const [deleting, setDeleting] =
+    useState(false);
+
+  const [deleteError, setDeleteError] =
+    useState("");
+
+  const confirmationMatches =
+    deleteConfirmation ===
+    project.name;
+
+  function closeDeleteModal() {
+    if (deleting) {
+      return;
+    }
+
+    setDeleteOpen(false);
+    setDeleteConfirmation("");
+    setDeleteError("");
+  }
+
+  async function confirmPermanentDelete() {
+    if (
+      !confirmationMatches ||
+      deleting
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError("");
+
+    const error =
+      await onDelete();
+
+    if (error) {
+      setDeleteError(error);
+      setDeleting(false);
+      return;
+    }
+
+    setDeleteOpen(false);
+  }
+
+  return (
+    <>
+      <button
+        className="back-btn"
+        onClick={onBack}
+      >
+        <ChevronLeft size={18} />
+        Kembali ke project
+      </button>
+
+      <section className="project-hero">
+        <div className="project-identity">
+          <ProjectMark project={project} />
+
+          <div>
+            <div className="title-line">
+              <h1>{project.name}</h1>
+              <StatusPill status={project.status} />
+            </div>
+
+            <a
+              href={`https://${project.domain}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Globe2 size={15} />
+              {project.domain}
+              <ExternalLink size={13} />
+            </a>
+          </div>
+        </div>
+
+        <div className="project-actions">
+          {canOperate && (
+            <>
+              <label className="secondary-btn upload-replace">
+                <CloudUpload size={17} />
+                Unggah ZIP
+
+                <input
+                  type="file"
+                  accept=".zip,application/zip"
+                  onChange={(event) => {
+                    const file =
+                      event.target.files?.[0];
+
+                    if (file) {
+                      void onUpload(file);
+                    }
+
+                    event.currentTarget.value =
+                      "";
+                  }}
+                />
+              </label>
+
+              <button
+                className="secondary-btn"
+                disabled={!project.archiveName}
+                onClick={() =>
+                  void onDeploy()
+                }
+              >
+                <RefreshCw size={17} />
+                Deploy ulang
+              </button>
+
+              <button
+                className={
+                  project.status ===
+                  "Stopped"
+                    ? "primary-btn"
+                    : "danger-btn"
+                }
+                onClick={onToggle}
+              >
+                {project.status ===
+                "Stopped" ? (
+                  <Play size={17} />
+                ) : (
+                  <Square
+                    size={16}
+                    fill="currentColor"
+                  />
+                )}
+
+                {project.status ===
+                "Stopped"
+                  ? "Jalankan"
+                  : "Hentikan"}
+              </button>
+            </>
+          )}
+
+          {isAdmin && (
+            <button
+              type="button"
+              className="danger-outline-btn"
+              onClick={() => {
+                setDeleteConfirmation("");
+                setDeleteError("");
+                setDeleteOpen(true);
+              }}
+            >
+              Hapus permanen
+            </button>
+          )}
+        </div>
+      </section>
+
+      <div className="detail-tabs">
+        {tabs.map(
+          ([id, label]) => (
+            <button
+              key={id}
+              className={
+                tab === id
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setTab(id)
+              }
+            >
+              {label}
+            </button>
+          ),
+        )}
+      </div>
+
+      {tab === "overview" && (
+        <OverviewTab
+          project={project}
+          notify={notify}
+        />
+      )}
+
+      {tab === "deployments" && (
+        <DeploymentsTab
+          projectId={project.id}
+          refreshProjects={
+            refreshProjects
+          }
+        />
+      )}
+
+      {tab === "environment" && (
+        <EnvironmentTab
+          project={project}
+          notify={notify}
+          canOperate={canOperate}
+        />
+      )}
+
+      {tab === "resources" && (
+        <ResourcesTab
+          project={project}
+          notify={notify}
+          canOperate={canOperate}
+        />
+      )}
+
+      {tab === "database" && (
+        <DatabaseTab
+          project={project}
+          notify={notify}
+          canOperate={canOperate}
+        />
+      )}
+
+      {tab === "backups" && (
+        <BackupsView
+          compact
+          project={project}
+          notify={notify}
+          canOperate={canOperate}
+        />
+      )}
+
+      {tab === "logs" && (
+        <LogPanel
+          projectId={project.id}
+        />
+      )}
+
+      {deleteOpen && (
+        <div
+          className="permanent-delete-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              closeDeleteModal();
+            }
+          }}
+        >
+          <section
+            className="permanent-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="permanent-delete-title"
+          >
+            <div className="permanent-delete-icon">
+              <CircleAlert size={27} />
+            </div>
+
+            <div className="permanent-delete-heading">
+              <div>
+                <p>Zona berbahaya</p>
+
+                <h2 id="permanent-delete-title">
+                  Hapus project permanen?
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="permanent-delete-close"
+                onClick={
+                  closeDeleteModal
+                }
+                disabled={deleting}
+                aria-label="Tutup"
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="permanent-delete-description">
+              Tindakan ini tidak dapat
+              dibatalkan. NEXDEPLOY akan
+              membersihkan seluruh resource
+              yang dimiliki project
+              <strong>
+                {" "}
+                {project.name}
+              </strong>
+              .
+            </p>
+
+            <div className="permanent-delete-resources">
+              <div>
+                <span>Container & worker</span>
+                <b>Dihapus</b>
+              </div>
+
+              <div>
+                <span>Docker image & network</span>
+                <b>Dihapus</b>
+              </div>
+
+              <div>
+                <span>Database & user database</span>
+                <b>Dihapus</b>
+              </div>
+
+              <div>
+                <span>ZIP & artifact aplikasi</span>
+                <b>Dihapus</b>
+              </div>
+
+              <div>
+                <span>Backup & deployment history</span>
+                <b>Dihapus</b>
+              </div>
+
+              <div>
+                <span>NPM Proxy Host</span>
+                <b>{project.domain}</b>
+              </div>
+            </div>
+
+            <label className="permanent-delete-confirmation">
+              <span>
+                Ketik{" "}
+                <strong>
+                  {project.name}
+                </strong>{" "}
+                untuk mengonfirmasi
+              </span>
+
+              <input
+                value={
+                  deleteConfirmation
+                }
+                disabled={deleting}
+                onChange={(event) => {
+                  setDeleteConfirmation(
+                    event.target.value,
+                  );
+                  setDeleteError("");
+                }}
+                placeholder={
+                  project.name
+                }
+                autoComplete="off"
+              />
+            </label>
+
+            {deleteError && (
+              <div className="permanent-delete-error">
+                <CircleAlert size={16} />
+                <span>
+                  {deleteError}
+                </span>
+              </div>
+            )}
+
+            <div className="permanent-delete-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                disabled={deleting}
+                onClick={
+                  closeDeleteModal
+                }
+              >
+                Batal
+              </button>
+
+              <button
+                type="button"
+                className="permanent-delete-submit"
+                disabled={
+                  !confirmationMatches ||
+                  deleting
+                }
+                onClick={() =>
+                  void confirmPermanentDelete()
+                }
+              >
+                {deleting
+                  ? "Menghapus seluruh resource..."
+                  : "Hapus project permanen"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
 }
+
 
 function OverviewTab({ project, notify }: { project: Project; notify: (message: string) => void }) {
   let validation: ArchiveValidation | null = null;

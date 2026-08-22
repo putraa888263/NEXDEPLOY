@@ -9,13 +9,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const source = await getD1().prepare("SELECT project_id AS projectId, archive_key AS archiveKey, archive_name AS archiveName FROM deployments WHERE id = ? AND status IN ('Failed', 'WaitingExecutor')").bind(id).first<{ projectId: string; archiveKey: string; archiveName: string }>();
   if (!source) return NextResponse.json({ error: "Hanya deployment gagal atau menunggu executor yang dapat dicoba ulang." }, { status: 400 });
-  const project = await getD1().prepare("SELECT name, framework FROM projects WHERE id = ?").bind(source.projectId).first<{ name: string; framework: string }>();
+  const project = await getD1().prepare("SELECT name, framework, database_type AS database FROM projects WHERE id = ?").bind(source.projectId).first<{ name: string; framework: string; database: "MariaDB" | "PostgreSQL" | "Tanpa database" }>();
   if (!project) return NextResponse.json({ error: "Project tidak ditemukan." }, { status: 404 });
   const deployment = { id: crypto.randomUUID(), createdAt: new Date().toISOString() };
   await getD1().batch([
     getD1().prepare("INSERT INTO deployments (id, project_id, status, requested_by, archive_key, archive_name, executor, action, source_deployment_id, created_at) VALUES (?, ?, 'Queued', ?, ?, ?, 'local-worker', 'Deploy', ?, ?)").bind(deployment.id, source.projectId, user.id, source.archiveKey, source.archiveName, id, deployment.createdAt),
     getD1().prepare("INSERT INTO activity (id, project_id, type, title, detail, created_at) VALUES (?, ?, 'deployment', ?, ?, ?)").bind(crypto.randomUUID(), source.projectId, "Deployment dicoba ulang", `${user.name} mencoba ulang ${source.archiveName}.`, deployment.createdAt),
   ]);
-  await processDeployment(deployment.id, { id: source.projectId, name: project.name, archive_key: source.archiveKey, archive_name: source.archiveName, framework: project.framework });
+  await processDeployment(deployment.id, { id: source.projectId, name: project.name, archive_key: source.archiveKey, archive_name: source.archiveName, framework: project.framework, database: project.database });
   return NextResponse.json({ deployment }, { status: 202 });
 }

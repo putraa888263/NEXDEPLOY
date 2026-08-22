@@ -54,6 +54,8 @@ import {
   runOneShot,
   listContainersByLabel,
   removeContainerIfExists,
+  removeImagesByLabel,
+  removeNetwork,
   diagnoseContainer,
   containerHttpHealthy,
   getContainerHostPort,
@@ -70,7 +72,14 @@ import {
 import {
   ensureProjectDatabase,
   backupProjectDatabase,
+  dropProjectDatabase,
 } from "./deployment/postgres.mjs";
+
+import {
+  ensureMariaDbProjectDatabase,
+  backupMariaDbProjectDatabase,
+  dropMariaDbProjectDatabase,
+} from "./deployment/mariadb.mjs";
 
 import {
   resolveLaravelReleaseRoot,
@@ -720,66 +729,161 @@ async function deployLaravelRelease(
     "Menyiapkan release Laravel (database dan environment).",
   );
 
-  const dbConfig = {
-    adminDb: process.env.NEXDEPLOY_POSTGRES_DB,
-    adminUser: process.env.NEXDEPLOY_POSTGRES_USER,
-    adminPass: process.env.NEXDEPLOY_POSTGRES_PASSWORD,
-    postgresHost: process.env.NEXDEPLOY_POSTGRES_HOST || "postgres",
-    postgresPort: process.env.NEXDEPLOY_POSTGRES_PORT || "5432",
-    internalNetwork: process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal",
-    projectsDir,
-    projectsVolume
-  };
+    const databaseType =
+      job.payload.databaseType ||
+      "PostgreSQL";
 
-  if (!dbConfig.adminDb || !dbConfig.adminUser || !dbConfig.adminPass) {
-    throw new DeployStageError("preparing", "PostgreSQL admin configuration missing.");
-  }
+    let dbConfig = null;
+    let dbMetadata = null;
+    let dbOverrides = {};
 
-  const dbMetadata =
-    await ensureProjectDatabase(
-      projectId,
-      dbConfig,
+    if (
+      databaseType ===
+      "PostgreSQL"
+    ) {
+      dbConfig = {
+        adminDb:
+          process.env.NEXDEPLOY_POSTGRES_DB,
+        adminUser:
+          process.env.NEXDEPLOY_POSTGRES_USER,
+        adminPass:
+          process.env.NEXDEPLOY_POSTGRES_PASSWORD,
+        postgresHost:
+          process.env.NEXDEPLOY_POSTGRES_HOST ||
+          "postgres",
+        postgresPort:
+          process.env.NEXDEPLOY_POSTGRES_PORT ||
+          "5432",
+        internalNetwork:
+          process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+          "nexdeploy_nexdeploy-internal",
+        projectsDir,
+        projectsVolume,
+      };
+
+      if (
+        !dbConfig.adminDb ||
+        !dbConfig.adminUser ||
+        !dbConfig.adminPass
+      ) {
+        throw new DeployStageError(
+          "preparing",
+          "PostgreSQL admin configuration missing.",
+        );
+      }
+
+      dbMetadata =
+        await ensureProjectDatabase(
+          projectId,
+          dbConfig,
+        );
+
+      dbOverrides = {
+        DB_CONNECTION:
+          "pgsql",
+        DB_HOST:
+          dbMetadata.host,
+        DB_PORT:
+          String(
+            dbMetadata.port,
+          ),
+        DB_DATABASE:
+          dbMetadata.database,
+        DB_USERNAME:
+          dbMetadata.username,
+        DB_PASSWORD:
+          dbMetadata.password,
+      };
+
+      await log(
+        job,
+        "success",
+        `[DATABASE] PostgreSQL project siap: ${dbMetadata.database}.`,
+      );
+    } else if (
+      databaseType ===
+      "MariaDB"
+    ) {
+      dbConfig = {
+        mariadbHost:
+          process.env.NEXDEPLOY_MARIADB_HOST ||
+          "mariadb",
+        mariadbPort:
+          process.env.NEXDEPLOY_MARIADB_PORT ||
+          "3306",
+        rootPassword:
+          process.env.NEXDEPLOY_MARIADB_ROOT_PASSWORD,
+        internalNetwork:
+          process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+          "nexdeploy_nexdeploy-internal",
+        projectsDir,
+        projectsVolume,
+      };
+
+      if (
+        !dbConfig.rootPassword
+      ) {
+        throw new DeployStageError(
+          "preparing",
+          "MariaDB admin configuration missing.",
+        );
+      }
+
+      dbMetadata =
+        await ensureMariaDbProjectDatabase(
+          projectId,
+          dbConfig,
+        );
+
+      dbOverrides = {
+        DB_CONNECTION:
+          "mysql",
+        DB_HOST:
+          dbMetadata.host,
+        DB_PORT:
+          String(
+            dbMetadata.port,
+          ),
+        DB_DATABASE:
+          dbMetadata.database,
+        DB_USERNAME:
+          dbMetadata.username,
+        DB_PASSWORD:
+          dbMetadata.password,
+      };
+
+      await log(
+        job,
+        "success",
+        `[DATABASE] MariaDB project siap: ${dbMetadata.database}.`,
+      );
+    } else if (
+      databaseType ===
+      "Tanpa database"
+    ) {
+      await log(
+        job,
+        "info",
+        "[DATABASE] Project dikonfigurasi tanpa database; provisioning dilewati.",
+      );
+    } else {
+      throw new DeployStageError(
+        "preparing",
+        `Database type tidak didukung: ${databaseType}.`,
+      );
+    }
+
+    const userEnvironment =
+      await loadProjectEnvironment(
+        projectsDir,
+        projectId,
+      );
+
+    await log(
+      job,
+      "info",
+      `[ENVIRONMENT] ${Object.keys(userEnvironment).length} variable environment project dimuat.`,
     );
-
-  await log(
-    job,
-    "success",
-    `[DATABASE] PostgreSQL project siap: ${dbMetadata.database}.`,
-  );
-
-  const userEnvironment =
-    await loadProjectEnvironment(
-      projectsDir,
-      projectId,
-    );
-
-  await log(
-    job,
-    "info",
-    `[ENVIRONMENT] ${Object.keys(userEnvironment).length} variable environment project dimuat.`,
-  );
-
-  const dbOverrides = {
-    DB_CONNECTION:
-      "pgsql",
-
-    DB_HOST:
-      dbMetadata.host,
-
-    DB_PORT:
-      String(
-        dbMetadata.port,
-      ),
-
-    DB_DATABASE:
-      dbMetadata.database,
-
-    DB_USERNAME:
-      dbMetadata.username,
-
-    DB_PASSWORD:
-      dbMetadata.password,
-  };
 
   await prepareLaravelEnvironment(
     release,
@@ -870,55 +974,132 @@ async function deployLaravelRelease(
       );
     }
 
-    await log(
-      job,
-      "info",
-      "[BACKUP] Membuat backup PostgreSQL sebelum migrasi.",
-    );
-
-    try {
-      const databaseBackup =
-        await backupProjectDatabase(
-          projectId,
-          dbMetadata,
-          dbConfig,
-          {
-            retention: 10,
-          },
+      if (
+        databaseType ===
+        "PostgreSQL"
+      ) {
+        await log(
+          job,
+          "info",
+          "[BACKUP] Membuat backup PostgreSQL sebelum migrasi.",
         );
 
-      await log(
-        job,
-        "success",
-        `[BACKUP] Backup PostgreSQL selesai: ${databaseBackup.fileName}`,
-      );
-    } catch (error) {
-      throw new DeployStageError(
-        "preparing",
-        `Backup PostgreSQL gagal: ${summarizeFailure(
-          error?.message,
-        )}`,
-      );
-    }
+        try {
+          const databaseBackup =
+            await backupProjectDatabase(
+              projectId,
+              dbMetadata,
+              dbConfig,
+              {
+                retention: 10,
+              },
+            );
 
-    await log(
-      job,
-      "info",
-      "[MIGRATION] Menjalankan migrasi database Laravel.",
-    );
+          await log(
+            job,
+            "success",
+            `[BACKUP] Backup PostgreSQL selesai: ${databaseBackup.fileName}`,
+          );
+        } catch (error) {
+          throw new DeployStageError(
+            "preparing",
+            `Backup PostgreSQL gagal: ${summarizeFailure(
+              error?.message,
+            )}`,
+          );
+        }
+      } else if (
+        databaseType ===
+        "MariaDB"
+      ) {
+        await log(
+          job,
+          "info",
+          "[BACKUP] Membuat backup MariaDB sebelum migrasi.",
+        );
 
-    try {
-      await runOneShot({
-        image: "nexdeploy/laravel-runtime:php-8.4",
-        network: process.env.NEXDEPLOY_INTERNAL_NETWORK || "nexdeploy_nexdeploy-internal",
-        workdir: release,
-        volumes: [`${projectsVolume}:${projectsDir}`],
-        command: ["php", "artisan", "migrate", "--force"],
-      });
-      await log(job, "success", "[MIGRATION] Migrasi database Laravel selesai.");
-    } catch (e) {
-      throw new DeployStageError("preparing", summarizeFailure(e));
-    }
+        try {
+          const databaseBackup =
+            await backupMariaDbProjectDatabase(
+              projectId,
+              dbMetadata,
+              dbConfig,
+              {
+                retention: 10,
+              },
+            );
+
+          await log(
+            job,
+            "success",
+            `[BACKUP] Backup MariaDB selesai: ${databaseBackup.fileName}`,
+          );
+        } catch (error) {
+          throw new DeployStageError(
+            "preparing",
+            `Backup MariaDB gagal: ${summarizeFailure(
+              error?.message,
+            )}`,
+          );
+        }
+      } else {
+        await log(
+          job,
+          "info",
+          "[BACKUP] Project tanpa database; backup dilewati.",
+        );
+      }
+
+      if (
+        databaseType !==
+        "Tanpa database"
+      ) {
+        await log(
+          job,
+          "info",
+          "[MIGRATION] Menjalankan migrasi database Laravel.",
+        );
+
+        try {
+          await runOneShot({
+            image:
+              "nexdeploy/laravel-runtime:php-8.4",
+            network:
+              process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+              "nexdeploy_nexdeploy-internal",
+            workdir:
+              release,
+            volumes: [
+              `${projectsVolume}:${projectsDir}`,
+            ],
+            command: [
+              "php",
+              "artisan",
+              "migrate",
+              "--force",
+            ],
+          });
+
+          await log(
+            job,
+            "success",
+            "[MIGRATION] Migrasi database Laravel selesai.",
+          );
+        } catch (error) {
+          throw new DeployStageError(
+            "preparing",
+            `Migrasi database Laravel gagal: ${summarizeFailure(
+              error?.message,
+            )}`,
+          );
+        }
+      } else {
+        await log(
+          job,
+          "info",
+          "[MIGRATION] Project tanpa database; migrasi dilewati.",
+        );
+      }
 
     await log(
       job,
@@ -1609,6 +1790,184 @@ async function waitForHealthy(
 
 
 
+
+async function permanentlyCleanupProject(
+  payload,
+) {
+  const {
+    projectId,
+    projectName,
+    databaseType,
+  } = payload;
+
+  if (
+    typeof projectId !== "string" ||
+    !/^[0-9a-fA-F-]{36}$/.test(projectId)
+  ) {
+    throw new Error(
+      "projectId tidak valid.",
+    );
+  }
+
+  const slug =
+    safeSlug(
+      projectName,
+    );
+
+  if (!slug) {
+    throw new Error(
+      "Nama project tidak dapat diubah menjadi slug yang aman.",
+    );
+  }
+
+  const projectLabel =
+    label(
+      PROJECT_LABEL_KEY,
+      slug,
+    );
+
+  const report = {
+    projectId,
+    slug,
+    containers: [],
+    images: [],
+    network:
+      null,
+    database:
+      null,
+    projectDirectory:
+      false,
+  };
+
+  // 1. Semua container project berdasarkan label.
+  const containers =
+    await listContainersByLabel(
+      projectLabel,
+    );
+
+  for (const name of containers) {
+    await removeContainerIfExists(
+      name,
+    );
+
+    report.containers.push(
+      name,
+    );
+  }
+
+  // Defensive cleanup untuk worker/scheduler lama.
+  for (
+    const name
+    of [
+      `nexdeploy-${slug}-worker`,
+      `nexdeploy-${slug}-scheduler`,
+    ]
+  ) {
+    await removeContainerIfExists(
+      name,
+    );
+  }
+
+  // 2. Database project.
+  const commonDbConfig = {
+    internalNetwork:
+      process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+      "nexdeploy_nexdeploy-internal",
+    projectsDir,
+    projectsVolume,
+  };
+
+  if (
+    databaseType ===
+    "PostgreSQL"
+  ) {
+    report.database =
+      await dropProjectDatabase(
+        projectId,
+        {
+          ...commonDbConfig,
+          adminDb:
+            process.env.NEXDEPLOY_POSTGRES_DB,
+          adminUser:
+            process.env.NEXDEPLOY_POSTGRES_USER,
+          adminPass:
+            process.env.NEXDEPLOY_POSTGRES_PASSWORD,
+          postgresHost:
+            process.env.NEXDEPLOY_POSTGRES_HOST ||
+            "postgres",
+          postgresPort:
+            process.env.NEXDEPLOY_POSTGRES_PORT ||
+            "5432",
+        },
+      );
+  } else if (
+    databaseType ===
+    "MariaDB"
+  ) {
+    report.database =
+      await dropMariaDbProjectDatabase(
+        projectId,
+        {
+          ...commonDbConfig,
+          mariadbHost:
+            process.env.NEXDEPLOY_MARIADB_HOST ||
+            "mariadb",
+          mariadbPort:
+            process.env.NEXDEPLOY_MARIADB_PORT ||
+            "3306",
+          rootPassword:
+            process.env.NEXDEPLOY_MARIADB_ROOT_PASSWORD,
+        },
+      );
+  } else if (
+    databaseType !==
+    "Tanpa database"
+  ) {
+    throw new Error(
+      `Database type tidak didukung: ${databaseType}.`,
+    );
+  }
+
+  // 3. Network setelah semua container sudah dilepas.
+  const projectNetwork =
+    networkName(
+      slug,
+    );
+
+  await removeNetwork(
+    projectNetwork,
+  );
+
+  report.network =
+    projectNetwork;
+
+  // 4. Semua Docker image project berdasarkan label.
+  report.images =
+    await removeImagesByLabel(
+      projectLabel,
+    );
+
+  // 5. Folder project terakhir.
+  // Ini sekaligus membuang release, backup DB,
+  // metadata DB, dan .nexdeploy-stable-port.
+  await rm(
+    join(
+      projectsDir,
+      projectId,
+    ),
+    {
+      recursive: true,
+      force: true,
+    },
+  );
+
+  report.projectDirectory =
+    true;
+
+  return report;
+}
+
+
 const server =
   createServer(
     async (
@@ -1705,6 +2064,108 @@ const server =
                 "Token executor tidak valid.",
             },
           );
+        }
+
+        const cleanupMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/cleanup$/,
+          );
+
+        if (
+          request.method ===
+            "POST" &&
+          cleanupMatch
+        ) {
+          if (
+            !authorized(
+              request,
+            )
+          ) {
+            return json(
+              response,
+              401,
+              {
+                error:
+                  "Token executor tidak valid.",
+              },
+            );
+          }
+
+          const projectId =
+            cleanupMatch[1];
+
+          const payload =
+            await body(
+              request,
+            );
+
+          if (
+            typeof payload.projectName !==
+              "string" ||
+            !payload.projectName.trim()
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "projectName wajib diisi.",
+              },
+            );
+          }
+
+          if (
+            ![
+              "MariaDB",
+              "PostgreSQL",
+              "Tanpa database",
+            ].includes(
+              payload.databaseType,
+            )
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "databaseType tidak valid.",
+              },
+            );
+          }
+
+          try {
+            const cleanup =
+              await permanentlyCleanupProject({
+                projectId,
+                projectName:
+                  payload.projectName,
+                databaseType:
+                  payload.databaseType,
+              });
+
+            return json(
+              response,
+              200,
+              {
+                ok:
+                  true,
+                cleanup,
+              },
+            );
+          } catch (error) {
+            return json(
+              response,
+              500,
+              {
+                error:
+                  sanitizeLogMessage(
+                    error instanceof Error
+                      ? error.message
+                      : "Cleanup project gagal.",
+                  ),
+              },
+            );
+          }
         }
 
         if (

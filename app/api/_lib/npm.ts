@@ -378,3 +378,81 @@ export async function ensureNpmProxyHost(
     certificateId: resolvedCertificateId,
   };
 }
+
+export async function deleteNpmProxyHost(
+  input: {
+    domain: string;
+    npmUrl: string;
+  },
+) {
+  const {
+    identity,
+    secret,
+  } = getNpmEnv();
+
+  if (
+    !input.npmUrl ||
+    !identity ||
+    !secret
+  ) {
+    return {
+      skipped: true,
+      deleted: false,
+      notFound: false,
+    };
+  }
+
+  validateDomain(
+    input.domain,
+  );
+
+  const npmUrl =
+    normalizeNpmUrl(
+      input.npmUrl,
+    );
+
+  const token =
+    await getNpmToken(
+      npmUrl,
+      identity,
+      secret,
+    );
+
+  const hosts =
+    await npmFetch<NpmProxyHost[]>(
+      npmUrl,
+      token,
+      "/api/nginx/proxy-hosts",
+    );
+
+  const existing =
+    hosts.find((host) =>
+      (host.domain_names ?? []).includes(
+        input.domain,
+      ),
+    );
+
+  if (!existing) {
+    return {
+      skipped: false,
+      deleted: false,
+      notFound: true,
+    };
+  }
+
+  await npmFetch<null>(
+    npmUrl,
+    token,
+    `/api/nginx/proxy-hosts/${existing.id}`,
+    {
+      method: "DELETE",
+    },
+  );
+
+  return {
+    skipped: false,
+    deleted: true,
+    notFound: false,
+    id: existing.id,
+  };
+}

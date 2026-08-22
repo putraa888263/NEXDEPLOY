@@ -652,3 +652,73 @@ export async function restoreProjectDatabase(
       metadata.username,
   };
 }
+export async function dropProjectDatabase(
+  projectId,
+  config,
+) {
+  const {
+    database,
+    username,
+  } =
+    projectDatabaseIdentity(
+      projectId,
+    );
+
+  const {
+    adminDb,
+    adminUser,
+    adminPass,
+    postgresHost,
+    postgresPort,
+    internalNetwork,
+  } = config;
+
+  if (
+    !adminDb ||
+    !adminUser ||
+    !adminPass
+  ) {
+    throw new Error(
+      "PostgreSQL admin configuration missing.",
+    );
+  }
+
+  await runOneShot({
+    image:
+      "postgres:17-alpine",
+    network:
+      internalNetwork,
+    env: {
+      PGHOST:
+        postgresHost,
+      PGPORT:
+        postgresPort,
+      PGDATABASE:
+        adminDb,
+      PGUSER:
+        adminUser,
+      PGPASSWORD:
+        adminPass,
+    },
+    command: [
+      "psql",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = '${database}'
+  AND pid <> pg_backend_pid();
+
+DROP DATABASE IF EXISTS "${database}";
+DROP ROLE IF EXISTS "${username}";
+      `.trim(),
+    ],
+  });
+
+  return {
+    database,
+    username,
+  };
+}

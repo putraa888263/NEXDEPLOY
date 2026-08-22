@@ -14,7 +14,7 @@
     const user = await requireUser(request);
     if (user.role === "Viewer") return NextResponse.json({ error: "Role Viewer tidak dapat memulai deployment." }, { status: 403 });
     const { id } = await params;
-    const project = await getD1().prepare("SELECT id, name, domain, archive_key, archive_name, framework FROM projects WHERE id = ?").bind(id).first<{ id: string; name: string; domain: string; archive_key: string | null; archive_name: string | null; framework: string }>();
+    const project = await getD1().prepare("SELECT id, name, domain, archive_key, archive_name, framework, database_type AS database FROM projects WHERE id = ?").bind(id).first<{ id: string; name: string; domain: string; archive_key: string | null; archive_name: string | null; framework: string; database: "MariaDB" | "PostgreSQL" | "Tanpa database" }>();
     if (!project) return NextResponse.json({ error: "Project tidak ditemukan." }, { status: 404 });
     if (!project.archive_key || !project.archive_name) return NextResponse.json({ error: "Unggah ZIP aplikasi yang valid sebelum deployment." }, { status: 400 });
     const running = await getD1().prepare("SELECT id FROM deployments WHERE project_id = ? AND status IN ('Queued', 'Running')").bind(id).first();
