@@ -12,7 +12,33 @@ function slugify(value: string) {
 
 export async function GET(request: Request) {
   await requireUser(request);
-  const results = await getD1().prepare("SELECT id, name, slug, domain, framework, database_type AS database, version, status, cpu, memory, color, archive_name AS archiveName, archive_size AS archiveSize, archive_validation AS archiveValidation, updated_at AS updatedAt FROM projects ORDER BY created_at DESC").all();
+  const results = await getD1().prepare(`
+      SELECT
+        projects.id,
+        projects.name,
+        projects.slug,
+        projects.domain,
+        projects.framework,
+        projects.database_type AS database,
+        projects.version,
+        projects.status,
+        projects.cpu,
+        projects.memory,
+        projects.color,
+        projects.archive_name AS archiveName,
+        projects.archive_size AS archiveSize,
+        projects.archive_validation AS archiveValidation,
+        projects.updated_at AS updatedAt,
+        EXISTS (
+          SELECT 1
+          FROM deployments
+          WHERE deployments.project_id = projects.id
+            AND deployments.status = 'Succeeded'
+            AND deployments.action = 'Deploy'
+        ) AS hasSuccessfulDeployment
+      FROM projects
+      ORDER BY projects.created_at DESC
+    `).all();
   return NextResponse.json({ projects: results.results ?? [] });
 }
 
@@ -32,7 +58,21 @@ export async function POST(request: Request) {
   while (await getD1().prepare("SELECT id FROM projects WHERE slug = ?").bind(slug).first()) slug = `${baseSlug}-${suffix++}`;
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const project = { id, name, slug, domain: `${slug}.${settings?.base_domain ?? "localhost"}`, framework, database, version: "v1.0.0", status: "Stopped", cpu: 0, memory: 0, color: colors[Math.floor(Math.random() * colors.length)], updatedAt: now };
+  const project = {
+      id,
+      name,
+      slug,
+      domain: `${slug}.${settings?.base_domain ?? "localhost"}`,
+      framework,
+      database,
+      version: "v1.0.0",
+      status: "Stopped",
+      cpu: 0,
+      memory: 0,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      updatedAt: now,
+      hasSuccessfulDeployment: false,
+    };
   await getD1().batch([
     getD1().prepare("INSERT INTO projects (id, name, slug, domain, framework, database_type, version, status, cpu, memory, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, name, slug, project.domain, framework, database, project.version, project.status, project.cpu, project.memory, project.color, now, now),
     getD1().prepare("INSERT INTO activity (id, project_id, type, title, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), id, "deployment", "Project dibuat", `${name} menunggu file ZIP untuk deployment.`, now),

@@ -72,6 +72,7 @@ type Project = {
   archiveName?: string | null;
   archiveSize?: number | null;
   archiveValidation?: string | null;
+    hasSuccessfulDeployment?: boolean | number;
 };
 
 type ProjectDraft = { name: string; framework: string; database: DatabaseType; fileName: string; file?: File };
@@ -330,12 +331,64 @@ export default function Home() {
     setSelected((current) => current?.id === project.id ? { ...current, ...update } : current);
     notify(`ZIP ${result.archive.detectedFramework} berhasil tervalidasi.`);
   }
-  async function deployProject(project: Project) {
-    const response = await fetch(`/api/projects/${project.id}/deployments`, { method: "POST" });
-    await response.json(); if (!response.ok) return notify(result.error || "Deployment gagal diantrikan.");
-    await loadPanel();
-    setSelected((current) => current?.id === project.id ? { ...current, status: "Stopped" } : current);
-    notify("Deployment diproses. Buka tab Deployment atau Log untuk melihat hasilnya.");
+  async function deployProject(
+    project: Project,
+  ) {
+    let response: Response;
+    let result: {
+      error?: string;
+      deployment?: Deployment;
+    };
+
+    try {
+      response = await fetch(
+        `/api/projects/${project.id}/deployments`,
+        {
+          method: "POST",
+        },
+      );
+
+      result = await response
+        .json()
+        .catch(() => ({}));
+    } catch {
+      return notify(
+        "Koneksi ke panel terputus saat memulai deployment.",
+      );
+    }
+
+    if (!response.ok) {
+      return notify(
+        result.error ||
+        "Deployment gagal diantrikan.",
+      );
+    }
+
+    setProjects((items) =>
+      items.map((item) =>
+        item.id === project.id
+          ? {
+              ...item,
+              status: "Deploying",
+            }
+          : item,
+      ),
+    );
+
+    setSelected((current) =>
+      current?.id === project.id
+        ? {
+            ...current,
+            status: "Deploying",
+          }
+        : current,
+    );
+
+    notify(
+      project.hasSuccessfulDeployment
+        ? "Deploy ulang diproses."
+        : "Deployment pertama diproses.",
+    );
   }
 
   async function deleteProjectPermanently(
@@ -696,14 +749,30 @@ function ProjectDetail({
               </label>
 
               <button
-                className="secondary-btn"
-                disabled={!project.archiveName}
+                className={
+                  project.hasSuccessfulDeployment
+                    ? "secondary-btn"
+                    : "primary-btn"
+                }
+                disabled={
+                  !project.archiveName ||
+                  project.status === "Deploying"
+                }
                 onClick={() =>
                   void onDeploy()
                 }
               >
-                <RefreshCw size={17} />
-                Deploy ulang
+                {project.hasSuccessfulDeployment ? (
+                  <RefreshCw size={17} />
+                ) : (
+                  <Play size={17} />
+                )}
+
+                {project.status === "Deploying"
+                  ? "Sedang deploy..."
+                  : project.hasSuccessfulDeployment
+                    ? "Deploy ulang"
+                    : "Deploy sekarang"}
               </button>
 
               <button
