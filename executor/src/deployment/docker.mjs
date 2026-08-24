@@ -398,6 +398,16 @@ export function stopContainer(
   ]);
 }
 
+export function startExistingContainer(name) {
+  assertName(name, "container");
+
+  return runDocker([
+    "container",
+    "start",
+    name,
+  ]);
+}
+
 export function removeNetwork(name) {
   assertName(name, "network");
 

@@ -167,85 +167,13 @@ export default function Home() {
   }
 
   async function toggleProject(project: Project) {
-    if (project.status === "Deploying") {
-      return notify(
-        "Project sedang deployment. Tunggu proses selesai.",
-      );
-    }
-
-    const nextStatus: ProjectStatus =
-      project.status === "Stopped"
-        ? "Healthy"
-        : "Stopped";
-
-    let response: Response;
-    let result: {
-      error?: string;
-      status?: ProjectStatus;
-      cpu?: number;
-      memory?: number;
-      updatedAt?: string;
-    };
-
-    try {
-      response = await fetch(
-        `/api/projects/${project.id}/status`,
-        {
-          method: "PATCH",
-          headers: {
-            "content-type":
-              "application/json",
-          },
-          body:
-            JSON.stringify({
-              status:
-                nextStatus,
-            }),
-        },
-      );
-
-      result =
-        await response
-          .json()
-          .catch(() => ({}));
-    } catch {
-      return notify(
-        "Executor tidak dapat dijangkau.",
-      );
-    }
-
-    if (!response.ok) {
-      return notify(
-        result.error ||
-        "Status project gagal diubah.",
-      );
-    }
-
-    setProjects((items) =>
-      items.map((item) =>
-        item.id === project.id
-          ? {
-              ...item,
-              ...result,
-            }
-          : item,
-      ),
-    );
-
-    setSelected((current) =>
-      current?.id === project.id
-        ? {
-            ...current,
-            ...result,
-          }
-        : current,
-    );
-
-    notify(
-      nextStatus === "Healthy"
-        ? "Project berhasil dijalankan"
-        : "Project berhasil dihentikan",
-    );
+    const nextStatus: ProjectStatus = project.status === "Stopped" ? "Healthy" : "Stopped";
+    const response = await fetch(`/api/projects/${project.id}/status`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: nextStatus }) });
+    if (!response.ok) return notify("Status project gagal diubah");
+    const update = await response.json();
+    setProjects((items) => items.map((item) => item.id === project.id ? { ...item, ...update } : item));
+    setSelected((current) => current?.id === project.id ? { ...current, ...update } : current);
+    notify(nextStatus === "Healthy" ? "Project berhasil dijalankan" : "Project berhasil dihentikan");
   }
 
   async function createProject(draft: ProjectDraft) {
@@ -634,375 +562,37 @@ const descriptions: Record<View, string> = {
 };
 
 function Dashboard({ projects, openProject, goProjects }: { projects: Project[]; openProject: (project: Project) => void; goProjects: () => void }) {
-  type SystemMetrics = {
-    timestamp: string;
-    cpu: {
-      usage: number;
-      cores: number;
-    };
-    memory: {
-      total: number;
-      used: number;
-      available: number;
-      usage: number;
-    };
-    disk: {
-      total: number;
-      used: number;
-      available: number;
-      usage: number;
-    };
-    load: {
-      one: number;
-      five: number;
-      fifteen: number;
-    };
-    uptime: number;
-    docker: {
-      status: string;
-      total: number;
-      running: number;
-      stopped: number;
-    };
-  };
-
   const active = projects.filter((p) => p.status === "Healthy").length;
-
-  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-  const [metricsError, setMetricsError] = useState("");
-  const [loadingMetrics, setLoadingMetrics] = useState(true);
-
-  const formatBytes = (bytes: number) => {
-    if (!Number.isFinite(bytes) || bytes <= 0) {
-      return "0 GB";
-    }
-
-    const gb = bytes / 1024 / 1024 / 1024;
-
-    if (gb >= 100) {
-      return `${gb.toFixed(0)} GB`;
-    }
-
-    return `${gb.toFixed(1)} GB`;
-  };
-
-  const formatUptime = (seconds: number) => {
-    const totalMinutes = Math.floor(seconds / 60);
-    const days = Math.floor(totalMinutes / 1440);
-    const hours = Math.floor((totalMinutes % 1440) / 60);
-    const minutes = totalMinutes % 60;
-
-    if (days > 0) {
-      return `${days} hari ${hours} jam`;
-    }
-
-    if (hours > 0) {
-      return `${hours} jam ${minutes} menit`;
-    }
-
-    return `${minutes} menit`;
-  };
-
-  const loadMetrics = useCallback(async () => {
-    try {
-      const response = await fetch(
-        "/api/system/metrics",
-        {
-          cache: "no-store",
-        },
-      );
-
-      const result = await response
-        .json()
-        .catch(() => ({})) as {
-          metrics?: SystemMetrics;
-          error?: string;
-        };
-
-      if (!response.ok || !result.metrics) {
-        throw new Error(
-          result.error ||
-          "Metrics VPS tidak tersedia.",
-        );
-      }
-
-      setMetrics(result.metrics);
-      setMetricsError("");
-    } catch (error) {
-      setMetricsError(
-        error instanceof Error
-          ? error.message
-          : "Metrics VPS tidak tersedia.",
-      );
-    } finally {
-      setLoadingMetrics(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(
-      () => {
-        void loadMetrics();
-      },
-      0,
-    );
-
-    const interval = window.setInterval(
-      () => {
-        void loadMetrics();
-      },
-      5000,
-    );
-
-    return () => {
-      window.clearTimeout(initialLoad);
-      window.clearInterval(interval);
-    };
-  }, [loadMetrics]);
-
-  const cpuUsage = metrics?.cpu.usage ?? 0;
-  const memoryUsage = metrics?.memory.usage ?? 0;
-  const diskUsage = metrics?.disk.usage ?? 0;
-
   return <>
     <section className="stat-grid">
-      <article className="stat-item">
-        <div className="stat-icon blue"><Box size={20} /></div>
-        <div>
-          <span>Project aktif</span>
-          <strong>{active}<small> / {projects.length}</small></strong>
-          <p>{projects.length ? "Project terdaftar di panel" : "Belum ada project"}</p>
-        </div>
-      </article>
-
-      <article className="stat-item">
-        <div className="stat-icon green"><Gauge size={20} /></div>
-        <div>
-          <span>CPU server</span>
-          <strong>
-            {loadingMetrics && !metrics ? "..." : cpuUsage.toFixed(1)}
-            <small>%</small>
-          </strong>
-          <p>
-            {metrics
-              ? `${metrics.cpu.cores} vCPU · ${cpuUsage < 80 ? "Normal" : "Tinggi"}`
-              : "Tidak tersedia"}
-          </p>
-        </div>
-        <div className="ring" style={{"--value": `${Math.min(100, cpuUsage)}%`} as React.CSSProperties}>
-          <span>{Math.round(cpuUsage)}%</span>
-        </div>
-      </article>
-
-      <article className="stat-item">
-        <div className="stat-icon violet"><Database size={20} /></div>
-        <div>
-          <span>Memory</span>
-          <strong>
-            {metrics ? formatBytes(metrics.memory.used).replace(" GB", "") : "..."}
-            <small> GB</small>
-          </strong>
-          <p>
-            {metrics
-              ? `dari ${formatBytes(metrics.memory.total)}`
-              : "Tidak tersedia"}
-          </p>
-        </div>
-        <div className="ring" style={{"--value": `${Math.min(100, memoryUsage)}%`} as React.CSSProperties}>
-          <span>{Math.round(memoryUsage)}%</span>
-        </div>
-      </article>
-
-      <article className="stat-item">
-        <div className="stat-icon orange"><HardDrive size={20} /></div>
-        <div>
-          <span>Penyimpanan</span>
-          <strong>
-            {metrics ? formatBytes(metrics.disk.used).replace(" GB", "") : "..."}
-            <small> GB</small>
-          </strong>
-          <p>
-            {metrics
-              ? `dari ${formatBytes(metrics.disk.total)}`
-              : "Tidak tersedia"}
-          </p>
-        </div>
-        <div className="ring" style={{"--value": `${Math.min(100, diskUsage)}%`} as React.CSSProperties}>
-          <span>{Math.round(diskUsage)}%</span>
-        </div>
-      </article>
+      <article className="stat-item"><div className="stat-icon blue"><Box size={20} /></div><div><span>Project aktif</span><strong>{active}<small> / {projects.length}</small></strong><p><b>+1</b> bulan ini</p></div></article>
+      <article className="stat-item"><div className="stat-icon green"><Gauge size={20} /></div><div><span>CPU server</span><strong>18<small>%</small></strong><p>Normal · 8 vCPU</p></div><div className="spark"><i style={{height: "35%"}}/><i style={{height: "48%"}}/><i style={{height: "38%"}}/><i style={{height: "62%"}}/><i style={{height: "44%"}}/><i style={{height: "52%"}}/></div></article>
+      <article className="stat-item"><div className="stat-icon violet"><Database size={20} /></div><div><span>Memory</span><strong>6.8<small> GB</small></strong><p>dari 16 GB</p></div><div className="ring" style={{"--value": "42%"} as React.CSSProperties}><span>42%</span></div></article>
+      <article className="stat-item"><div className="stat-icon orange"><HardDrive size={20} /></div><div><span>Penyimpanan</span><strong>27.4<small> GB</small></strong><p>dari 64 GB</p></div><div className="storage-bar"><span /></div></article>
     </section>
 
     <section className="dashboard-grid">
       <div className="panel projects-panel">
-        <div className="panel-head">
-          <div>
-            <h2>Kondisi VPS</h2>
-            <p>Monitoring host diperbarui otomatis setiap 5 detik</p>
-          </div>
-
-          <button
-            className="icon-btn subtle"
-            title="Muat ulang metrics"
-            onClick={() => void loadMetrics()}
-          >
-            <RefreshCw size={16} />
-          </button>
-        </div>
-
+        <div className="panel-head"><div><h2>Project kamu</h2><p>Status aplikasi terbaru</p></div><button className="text-btn" onClick={goProjects}>Lihat semua <ChevronLeft size={15} className="rotate" /></button></div>
         <div className="project-list">
-          <div className="project-row">
-            <div className="stat-icon blue"><Activity size={18} /></div>
-            <div className="project-main">
-              <strong>Load average</strong>
-              <span>1 menit / 5 menit / 15 menit</span>
-            </div>
-            <div className="project-tech">
-              <b>
-                {metrics
-                  ? `${metrics.load.one.toFixed(2)} / ${metrics.load.five.toFixed(2)} / ${metrics.load.fifteen.toFixed(2)}`
-                  : "—"}
-              </b>
-            </div>
-          </div>
-
-          <div className="project-row">
-            <div className="stat-icon green"><Clock3 size={18} /></div>
-            <div className="project-main">
-              <strong>Uptime VPS</strong>
-              <span>Waktu server aktif</span>
-            </div>
-            <div className="project-tech">
-              <b>{metrics ? formatUptime(metrics.uptime) : "—"}</b>
-            </div>
-          </div>
-
-          <div className="project-row">
-            <div className="stat-icon violet"><Server size={18} /></div>
-            <div className="project-main">
-              <strong>Docker</strong>
-              <span>
-                {metrics
-                  ? `${metrics.docker.running} running · ${metrics.docker.stopped} stopped`
-                  : "Status container tidak tersedia"}
-              </span>
-            </div>
-            <div className="project-tech">
-              <b>
-                {metrics
-                  ? `${metrics.docker.running} / ${metrics.docker.total}`
-                  : "—"}
-              </b>
-              <span>
-                {metrics?.docker.status === "healthy"
-                  ? "Healthy"
-                  : "Error"}
-              </span>
-            </div>
-          </div>
-
-          <div className="project-row">
-            <div className="stat-icon orange"><RefreshCw size={18} /></div>
-            <div className="project-main">
-              <strong>Status monitoring</strong>
-              <span>
-                {metricsError
-                  ? metricsError
-                  : "Executor terhubung dan metrics tersedia"}
-              </span>
-            </div>
-            <div className="project-tech">
-              <b>{metricsError ? "Gangguan" : "Online"}</b>
-              <span>
-                {metrics
-                  ? `Update ${new Date(metrics.timestamp).toLocaleTimeString("id-ID")}`
-                  : "Menunggu data"}
-              </span>
-            </div>
-          </div>
+          {projects.slice(0, 4).map((project) => <button className="project-row" key={project.slug} onClick={() => openProject(project)}>
+            <ProjectMark project={project} /><div className="project-main"><strong>{project.name}</strong><span>{project.domain}</span></div><div className="project-tech"><b>{project.framework}</b><span>{project.version}</span></div><StatusPill status={project.status} /><div className="updated"><Clock3 size={14} />{relativeTime(project.updatedAt)}</div><ChevronLeft size={17} className="rotate" />
+          </button>)}
         </div>
       </div>
 
       <div className="panel activity-panel">
-        <div className="panel-head">
-          <div>
-            <h2>Project kamu</h2>
-            <p>Status aplikasi terbaru</p>
-          </div>
-          <button className="text-btn" onClick={goProjects}>
-            Lihat semua <ChevronLeft size={15} className="rotate" />
-          </button>
-        </div>
-
+        <div className="panel-head"><div><h2>Aktivitas terbaru</h2><p>24 jam terakhir</p></div><button className="icon-btn subtle" title="Muat ulang"><RefreshCw size={16} /></button></div>
         <div className="timeline">
-          {projects.slice(0, 4).map((project) => (
-            <div key={project.id}>
-              <span className={`timeline-icon ${project.status === "Healthy" ? "success" : project.status === "Deploying" ? "info" : "warning"}`}>
-                {project.status === "Healthy"
-                  ? <Check size={14} />
-                  : project.status === "Deploying"
-                    ? <CloudUpload size={14} />
-                    : <CircleAlert size={14} />}
-              </span>
-
-              <p>
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => openProject(project)}
-                >
-                  <strong>{project.name}</strong>
-                </button>
-                <small>
-                  {project.domain} · {relativeTime(project.updatedAt)}
-                </small>
-              </p>
-            </div>
-          ))}
-
-          {!projects.length && (
-            <div>
-              <span className="timeline-icon info"><Box size={14} /></span>
-              <p>
-                <strong>Belum ada project</strong>
-                <small>Project baru akan muncul di sini.</small>
-              </p>
-            </div>
-          )}
+          <div><span className="timeline-icon success"><Check size={14} /></span><p><strong>NexBill berhasil di-deploy</strong><small>Versi v1.8.2 · 4 menit lalu</small></p></div>
+          <div><span className="timeline-icon info"><CloudUpload size={14} /></span><p><strong>Deployment Kasir API dimulai</strong><small>Oleh Ade · 12 menit lalu</small></p></div>
+          <div><span className="timeline-icon violet"><Archive size={14} /></span><p><strong>Backup otomatis dibuat</strong><small>Toko Merdeka · 3 jam lalu</small></p></div>
+          <div><span className="timeline-icon warning"><CircleAlert size={14} /></span><p><strong>Arsip Lama dihentikan</strong><small>Oleh Ade · 6 hari lalu</small></p></div>
         </div>
       </div>
     </section>
 
-    <section className="quick-actions">
-      <div>
-        <h2>Status server</h2>
-        <p>
-          {metricsError
-            ? "Monitoring sedang mengalami gangguan."
-            : metrics
-              ? `CPU ${cpuUsage.toFixed(1)}% · RAM ${memoryUsage.toFixed(1)}% · Disk ${diskUsage.toFixed(1)}%`
-              : "Mengambil kondisi VPS..."}
-        </p>
-      </div>
-
-      <div className="quick-list">
-        <button onClick={() => void loadMetrics()}>
-          <span className="quick-icon"><RefreshCw size={20} /></span>
-          <span>
-            <strong>Refresh metrics</strong>
-            <small>Ambil kondisi VPS terbaru</small>
-          </span>
-        </button>
-
-        <button onClick={goProjects}>
-          <span className="quick-icon"><Box size={20} /></span>
-          <span>
-            <strong>Semua project</strong>
-            <small>Lihat aplikasi yang dikelola</small>
-          </span>
-        </button>
-      </div>
-    </section>
+    <section className="quick-actions"><div><h2>Aksi cepat</h2><p>Pekerjaan rutin, satu klik lebih dekat.</p></div><div className="quick-list"><button><span className="quick-icon"><CloudUpload size={20} /></span><span><strong>Deploy ZIP</strong><small>Unggah aplikasi baru</small></span></button><button><span className="quick-icon"><Archive size={20} /></span><span><strong>Buat backup</strong><small>Simpan kondisi saat ini</small></span></button><button><span className="quick-icon"><TerminalSquare size={20} /></span><span><strong>Buka log</strong><small>Pantau proses server</small></span></button></div></section>
   </>;
 }
 

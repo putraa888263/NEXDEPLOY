@@ -384,18 +384,22 @@ export async function backupMariaDbProjectDatabase(
 
   const shellCommand = [
     "set -eu",
-    'mariadb-dump',
-    `-h "${metadata.host}"`,
-    `-P "${metadata.port}"`,
-    `-u "${metadata.username}"`,
-    '--single-transaction',
-    '--quick',
-    '--routines',
-    '--triggers',
-    '--events',
-    `--result-file="${outputPath}"`,
-    `"${metadata.database}"`,
-  ].join(" ");
+    "umask 077",
+    [
+      "mariadb-dump",
+      `-h "${metadata.host}"`,
+      `-P "${metadata.port}"`,
+      `-u "${metadata.username}"`,
+      "--single-transaction",
+      "--quick",
+      "--routines",
+      "--triggers",
+      "--events",
+      `"${metadata.database}"`,
+      `> "${outputPath}"`,
+    ].join(" "),
+    `test -s "${outputPath}"`,
+  ].join("; ");
 
   await runOneShot({
     image:
@@ -415,6 +419,28 @@ export async function backupMariaDbProjectDatabase(
       shellCommand,
     ],
   });
+
+  let backupStat;
+
+  try {
+    backupStat =
+      await fs.stat(
+        outputPath,
+      );
+  } catch {
+    throw new Error(
+      "File backup database MariaDB tidak ditemukan setelah mariadb-dump.",
+    );
+  }
+
+  if (
+    !backupStat.isFile() ||
+    backupStat.size < 1
+  ) {
+    throw new Error(
+      "File backup database MariaDB kosong atau tidak valid.",
+    );
+  }
 
   const entries =
     await fs.readdir(
@@ -451,6 +477,8 @@ export async function backupMariaDbProjectDatabase(
     fileName,
     path:
       outputPath,
+    size:
+      backupStat.size,
   };
 }
 

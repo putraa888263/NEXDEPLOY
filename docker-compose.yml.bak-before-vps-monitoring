@@ -47,8 +47,6 @@ services:
     volumes:
       - executor-projects:/opt/nexdeploy/projects
       - /var/run/docker.sock:/var/run/docker.sock
-      - /proc:/host/proc:ro
-      - /:/host/root:ro
     networks:
       - nexdeploy-internal
 
