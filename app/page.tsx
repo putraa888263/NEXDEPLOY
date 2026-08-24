@@ -1669,20 +1669,120 @@ function ActivityView() {
   const [filter, setFilter] = useState("all");
   const [records, setRecords] = useState<ActivityRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { setLoading(true); void fetch(`/api/activity?type=${filter}`).then((response) => response.json()).then((data) => setRecords(data.activity ?? [])).finally(() => setLoading(false)); }, [filter]);
-  const filters = [["all", "Semua"], ["deployment", "Deployment"], ["backup", "Backup"], ["account", "Akun"], ["environment", "Environment"], ["resource", "Resource"], ["system", "Sistem"]];
+  useEffect(() => {
+      let cancelled = false;
+
+      void fetch(`/api/activity?type=${filter}`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (!cancelled) {
+            setRecords(data.activity ?? []);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }, [filter]);
+
+    const filters = [["all", "Semua"], ["deployment", "Deployment"], ["backup", "Backup"], ["account", "Akun"], ["environment", "Environment"], ["resource", "Resource"], ["system", "Sistem"]];
   const icon = (type: ActivityRecord["type"]) => type === "deployment" ? <CloudUpload size={15} /> : type === "backup" ? <Archive size={15} /> : type === "account" ? <ShieldCheck size={15} /> : type === "environment" ? <Settings size={15} /> : type === "resource" ? <Gauge size={15} /> : <Square size={13} />;
   const tone = (type: ActivityRecord["type"]) => type === "backup" ? "violet" : type === "system" ? "warning" : type === "account" ? "success" : "info";
-  return <section className="panel activity-page"><div className="activity-filters">{filters.map(([id, label]) => <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>)}</div><div className="activity-feed">{loading ? <p className="user-empty">Memuat aktivitas...</p> : records.length ? records.map((record) => <div key={record.id}><span className={`timeline-icon ${tone(record.type)}`}>{icon(record.type)}</span><div><strong>{record.title}</strong><p>{record.detail}</p><small>{record.projectName ? `${record.projectName} · ` : ""}{relativeTime(record.createdAt)}</small></div></div>) : <div className="empty-state"><Activity size={28} /><h3>Belum ada aktivitas</h3><p>Tindakan pada project dan akun akan tercatat di sini.</p></div>}</div></section>;
+  return <section className="panel activity-page"><div className="activity-filters">{filters.map(([id, label]) => <button key={id} className={filter === id ? "active" : ""} onClick={() => {
+      setLoading(true);
+      setFilter(id);
+    }}>{label}</button>)}</div><div className="activity-feed">{loading ? <p className="user-empty">Memuat aktivitas...</p> : records.length ? records.map((record) => <div key={record.id}><span className={`timeline-icon ${tone(record.type)}`}>{icon(record.type)}</span><div><strong>{record.title}</strong><p>{record.detail}</p><small>{record.projectName ? `${record.projectName} · ` : ""}{relativeTime(record.createdAt)}</small></div></div>) : <div className="empty-state"><Activity size={28} /><h3>Belum ada aktivitas</h3><p>Tindakan pada project dan akun akan tercatat di sini.</p></div>}</div></section>;
 }
 
 function BackupsView({ compact = false, project, notify, canOperate = false }: { compact?: boolean; project?: Project; notify: (m: string) => void; canOperate?: boolean }) {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(Boolean(project));
-  const loadBackups = useCallback(async () => { if (!project) return; const response = await fetch(`/api/projects/${project.id}/backups`); await response.json(); if (response.ok) setBackups(result.backups ?? []); setLoading(false); }, [project]);
-  useEffect(() => { void loadBackups(); }, [loadBackups]);
-  const createBackup = async () => { if (!project) return notify("Pilih project untuk membuat backup."); const response = await fetch(`/api/projects/${project.id}/backups`, { method: "POST" }); await response.json(); if (!response.ok) return notify(result.error || "Backup gagal diantrikan."); setBackups((items) => [result.backup, ...items]); notify("Backup diantrikan dan menunggu executor VPS."); };
-  const restoreBackup = async (backup: Backup) => { if (!confirm(`Pulihkan ${backup.name}? Tidak ada data yang diubah sebelum executor VPS tersedia.`)) return; const response = await fetch(`/api/backups/${backup.id}/restore`, { method: "POST" }); await response.json(); if (!response.ok) return notify(result.error || "Restore gagal diantrikan."); notify("Restore diantrikan dan menunggu executor VPS."); };
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void fetch(`/api/projects/${project.id}/backups`)
+      .then(async (response) => {
+        const result = await response.json().catch(() => ({}));
+
+        if (!cancelled && response.ok) {
+          setBackups(result.backups ?? []);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
+  const createBackup = async () => {
+    if (!project) {
+      return notify("Pilih project untuk membuat backup.");
+    }
+
+    const response = await fetch(
+      `/api/projects/${project.id}/backups`,
+      { method: "POST" },
+    );
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      return notify(
+        result.error || "Backup gagal diantrikan.",
+      );
+    }
+
+    if (result.backup) {
+      setBackups((items) => [
+        result.backup,
+        ...items,
+      ]);
+    }
+
+    notify(
+      "Backup diantrikan dan menunggu executor VPS.",
+    );
+  };
+  const restoreBackup = async (backup: Backup) => {
+    if (
+      !confirm(
+        `Pulihkan ${backup.name}? Tidak ada data yang diubah sebelum executor VPS tersedia.`,
+      )
+    ) {
+      return;
+    }
+
+    const response = await fetch(
+      `/api/backups/${backup.id}/restore`,
+      { method: "POST" },
+    );
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      return notify(
+        result.error || "Restore gagal diantrikan.",
+      );
+    }
+
+    notify(
+      "Restore diantrikan dan menunggu executor VPS.",
+    );
+  };
   if (!project) return <section className="panel backup-page"><div className="panel-head"><div><h2>Backup terbaru</h2><p>Pilih project untuk melihat atau membuat backup.</p></div></div><div className="empty-state"><Archive size={28} /><h3>Backup per project</h3><p>Buka detail project, lalu pilih tab Backup.</p></div></section>;
   return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>Backup {project.name}</h2><p>Retensi mengikuti pengaturan panel. Executor akan membuat file aplikasi dan database.</p></div>{canOperate && <button className="primary-btn" onClick={() => void createBackup()}><Plus size={17} />Buat backup</button>}</div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Jenis</span><span>Status</span><span>Dibuat</span><span /></div>{loading ? <div className="empty-state"><p>Memuat backup...</p></div> : backups.length ? backups.map((backup) => <div className="table-row" key={backup.id}><span className="backup-name"><Archive size={17} /><strong>{backup.name}</strong></span><span>{backup.type}</span><span className="status status-deploying">Menunggu executor</span><span>{relativeTime(backup.createdAt)}</span>{canOperate ? <button className="restore-btn" onClick={() => void restoreBackup(backup)}><RotateCcw size={15} />Pulihkan</button> : <span />}</div>) : <div className="empty-state"><Archive size={26} /><h3>Belum ada backup</h3><p>Buat backup untuk menyiapkan pemulihan saat executor VPS tersedia.</p></div>}</div></section>;
 }
@@ -1726,13 +1826,41 @@ const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "O
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState("");
 
-  const loadUsers = async () => {
-    const response = await fetch("/api/users");
-    await response.json(); if (!response.ok) { setError(result.error || "Daftar pengguna gagal dimuat."); return; }
-    setUsers(result.users);
-  };
+  useEffect(() => {
+    let cancelled = false;
 
-  useEffect(() => { void loadUsers().finally(() => setLoading(false)); }, []);
+    void fetch("/api/users")
+      .then(async (response) => {
+        const result = await response.json().catch(() => ({}));
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setError(
+            result.error || "Daftar pengguna gagal dimuat.",
+          );
+          return;
+        }
+
+        setUsers(result.users ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("Daftar pengguna gagal dimuat.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
