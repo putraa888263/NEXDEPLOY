@@ -61,6 +61,7 @@ import {
   containerHttpHealthy,
   getContainerHostPort,
   containerRunning,
+  containerStats,
   stopContainer,
   startExistingContainer,
 } from "./deployment/docker.mjs";
@@ -2582,6 +2583,93 @@ async function getProjectRuntimeContainers(projectSlug) {
   };
 }
 
+async function getProjectRuntimeStatus(projectSlug) {
+  const runtime =
+    await getProjectRuntimeContainers(
+      projectSlug,
+    );
+
+  const appRunning =
+    await containerRunning(
+      runtime.app,
+    );
+
+  let stats = {
+    cpu: 0,
+    memoryUsed: "0B",
+    memoryPercent: 0,
+  };
+
+  if (appRunning) {
+    stats =
+      await containerStats(
+        runtime.app,
+      );
+  }
+
+  const worker =
+    runtime.background.find(
+      (name) =>
+        name.endsWith("-worker"),
+    ) ?? null;
+
+  const scheduler =
+    runtime.background.find(
+      (name) =>
+        name.endsWith("-scheduler"),
+    ) ?? null;
+
+  const workerRunning =
+    worker
+      ? await containerRunning(worker)
+      : false;
+
+  const schedulerRunning =
+    scheduler
+      ? await containerRunning(
+          scheduler,
+        )
+      : false;
+
+  return {
+    status:
+      appRunning
+        ? "Healthy"
+        : "Stopped",
+
+    app: {
+      name:
+        runtime.app,
+      running:
+        appRunning,
+      cpu:
+        Number(
+          stats.cpu.toFixed(1),
+        ),
+      memoryUsed:
+        stats.memoryUsed,
+      memoryPercent:
+        Number(
+          stats.memoryPercent.toFixed(1),
+        ),
+    },
+
+    worker: {
+      name:
+        worker,
+      running:
+        workerRunning,
+    },
+
+    scheduler: {
+      name:
+        scheduler,
+      running:
+        schedulerRunning,
+    },
+  };
+}
+
 async function stopProjectRuntime(projectSlug) {
   const runtime =
     await getProjectRuntimeContainers(
@@ -2883,6 +2971,65 @@ const server =
                     error instanceof Error
                       ? error.message
                       : "Metrics VPS gagal dibaca.",
+                  ),
+              },
+            );
+          }
+        }
+
+        const projectRuntimeStatusMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/runtime\/status$/,
+          );
+
+        if (
+          request.method === "GET" &&
+          projectRuntimeStatusMatch
+        ) {
+          const projectId =
+            projectRuntimeStatusMatch[1];
+
+          const projectSlug =
+            url.searchParams.get(
+              "projectSlug",
+            );
+
+          if (!projectSlug) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "projectSlug wajib diisi.",
+              },
+            );
+          }
+
+          try {
+            const runtime =
+              await getProjectRuntimeStatus(
+                projectSlug,
+              );
+
+            return json(
+              response,
+              200,
+              {
+                ok: true,
+                projectId,
+                runtime,
+              },
+            );
+          } catch (error) {
+            return json(
+              response,
+              404,
+              {
+                error:
+                  sanitizeLogMessage(
+                    error instanceof Error
+                      ? error.message
+                      : "Runtime project tidak tersedia.",
                   ),
               },
             );

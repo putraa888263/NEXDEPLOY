@@ -383,6 +383,55 @@ export async function containerRunning(name) {
   return output.trim() === "true";
 }
 
+
+export async function containerStats(name) {
+  assertName(name, "container");
+
+  const output =
+    await runDocker([
+      "stats",
+      "--no-stream",
+      "--format",
+      "{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}",
+      name,
+    ]);
+
+  const [
+    cpuRaw = "0%",
+    memoryRaw = "0B / 0B",
+    memoryPercentRaw = "0%",
+  ] = output.trim().split("|");
+
+  const cpu =
+    Number.parseFloat(
+      cpuRaw.replace("%", ""),
+    );
+
+  const memoryPercent =
+    Number.parseFloat(
+      memoryPercentRaw.replace("%", ""),
+    );
+
+  const memoryUsed =
+    memoryRaw
+      .split("/")[0]
+      ?.trim() || "0B";
+
+  return {
+    cpu:
+      Number.isFinite(cpu)
+        ? cpu
+        : 0,
+
+    memoryUsed,
+
+    memoryPercent:
+      Number.isFinite(memoryPercent)
+        ? memoryPercent
+        : 0,
+  };
+}
+
 export function stopContainer(
   name,
   { timeoutSeconds = 10 } = {},
