@@ -442,7 +442,8 @@ export default function Home() {
 
   async function login(email: string, password: string) {
     const response = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
-    await response.json(); if (!response.ok) return result.error || "Login gagal.";
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return result.error || "Login gagal.";
     setRole(result.user.role as Role);
     setSignedInUser(result.user as SignedInUser);
     await loadPanel();
@@ -456,7 +457,8 @@ export default function Home() {
   }
   async function changePassword(currentPassword: string, newPassword: string) {
     const response = await fetch("/api/account/password", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
-    await response.json(); if (!response.ok) return result.error || "Password gagal diubah.";
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return result.error || "Password gagal diubah.";
     setRole(null);
     setSignedInUser(null);
     setProjects([]);
@@ -1639,7 +1641,8 @@ useEffect(() => { void fetch(`/api/projects/${project.id}/environment`).then((re
   const save = async () => {
     setSaving(true); setError("");
     const response = await fetch(`/api/projects/${project.id}/environment`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ environment: entries }) });
-    await response.json(); setSaving(false);
+    const result = await response.json().catch(() => ({}));
+    setSaving(false);
     if (!response.ok) return setError(result.error || "Environment gagal disimpan.");
     setEntries((items) => items.map((entry) => ({ ...entry, value: entry.isSecret ? "" : entry.value, saved: true })));
     notify("Environment berhasil disimpan.");
@@ -1654,7 +1657,33 @@ function ResourcesTab({ project, notify, canOperate }: { project: Project; notif
   const [error, setError] = useState("");
 useEffect(() => { void fetch(`/api/projects/${project.id}/resources`).then((response) => response.json()).then((data) => { if (data.resources) setResources(data.resources); else setError(data.error || "Resource gagal dimuat."); }).catch(() => setError("Resource gagal dimuat.")).finally(() => setLoading(false)); }, [project.id]);
   const update = (key: keyof ProjectResources, value: string | number) => setResources((current) => ({ ...current, [key]: value }));
-  const save = async () => { setSaving(true); setError(""); const response = await fetch(`/api/projects/${project.id}/resources`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(resources) }); await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Resource gagal disimpan."); setResources(result.resources); notify("Konfigurasi resource berhasil disimpan."); };
+  const save = async () => {
+    setSaving(true);
+    setError("");
+
+    const response = await fetch(
+      `/api/projects/${project.id}/resources`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(resources),
+      },
+    );
+
+    const result = await response.json().catch(() => ({}));
+    setSaving(false);
+
+    if (!response.ok) {
+      return setError(
+        result.error || "Resource gagal disimpan.",
+      );
+    }
+
+    setResources(result.resources);
+    notify("Konfigurasi resource berhasil disimpan.");
+  };
   return <section className="panel form-panel"><div className="panel-head"><div><h2>Resource container</h2><p>Batas ini akan diterapkan executor Docker saat project dideploy ke VPS.</p></div>{canOperate && <button className="primary-btn" disabled={saving || loading} onClick={() => void save()}><Check size={17} />{saving ? "Menyimpan..." : "Simpan"}</button>}</div>{error && <p className="login-error environment-error">{error}</p>}{loading ? <p className="user-empty">Memuat konfigurasi resource...</p> : <div className="resource-form"><label><span>Versi PHP</span><select disabled={!canOperate} value={resources.phpVersion} onChange={(event) => update("phpVersion", event.target.value)}>{["8.1", "8.2", "8.3", "8.4"].map((version) => <option key={version}>{version}</option>)}</select></label><label><span>CPU limit (vCPU)</span><input disabled={!canOperate} type="number" min="1" max="16" value={resources.cpuLimit} onChange={(event) => update("cpuLimit", Number(event.target.value))} /></label><label><span>Memory limit (MB)</span><input disabled={!canOperate} type="number" min="128" max="32768" step="128" value={resources.memoryLimit} onChange={(event) => update("memoryLimit", Number(event.target.value))} /></label><label><span>Disk quota (GB)</span><input disabled={!canOperate} type="number" min="1" max="1000" value={resources.diskQuota} onChange={(event) => update("diskQuota", Number(event.target.value))} /></label><label><span>Port internal</span><input disabled={!canOperate} type="number" min="1024" max="65535" value={resources.internalPort} onChange={(event) => update("internalPort", Number(event.target.value))} /></label><div className="resource-executor"><Server size={19} /><div><strong>Rencana executor</strong><span>PHP {resources.phpVersion} · {resources.cpuLimit} vCPU · {resources.memoryLimit} MB · {resources.diskQuota} GB · port {resources.internalPort}</span></div></div></div>}</section>;
 }
 
@@ -1865,7 +1894,8 @@ const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "O
   const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const response = await fetch("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
-    await response.json(); if (!response.ok) return setError(result.error || "Akun gagal dibuat.");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return setError(result.error || "Akun gagal dibuat.");
     setUsers((items) => [...items, result.user]);
     setDraft({ name: "", email: "", password: "", role: "Operator" });
     setError("");
@@ -1874,7 +1904,8 @@ const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "O
 
   const updateUser = async (user: PanelUser, changes: Partial<Pick<PanelUser, "role" | "status">>) => {
     const response = await fetch(`/api/users/${user.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(changes) });
-    await response.json(); if (!response.ok) return setError(result.error || "Akun gagal diperbarui.");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return setError(result.error || "Akun gagal diperbarui.");
     setUsers((items) => items.map((item) => item.id === user.id ? { ...item, ...result.user } : item));
     setError("");
     notify(`Akses ${user.email} diperbarui`);
@@ -1882,7 +1913,8 @@ const [draft, setDraft] = useState({ name: "", email: "", password: "", role: "O
 
   const resetPassword = async (user: PanelUser) => {
     const response = await fetch(`/api/users/${user.id}/reset-password`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: temporaryPassword }) });
-    await response.json(); if (!response.ok) return setError(result.error || "Password gagal direset.");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return setError(result.error || "Password gagal direset.");
     setTemporaryPassword("");
     setResetUserId(null);
     setError("");
@@ -1906,7 +1938,42 @@ function CreateProjectModal({ onClose, onSubmit, baseDomain, defaultDatabase }: 
 
 function InitialSetup({ onComplete }: { onComplete: () => void }) {
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [confirmation, setConfirmation] = useState(""); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (password !== confirmation) return setError("Konfirmasi password belum sama."); setSaving(true); setError(""); const response = await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, password }) }); await response.json(); setSaving(false); if (!response.ok) return setError(result.error || "Instalasi awal gagal."); onComplete(); };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (password !== confirmation) {
+      return setError("Konfirmasi password belum sama.");
+    }
+
+    setSaving(true);
+    setError("");
+
+    const response = await fetch(
+      "/api/setup",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+        }),
+      },
+    );
+
+    const result = await response.json().catch(() => ({}));
+    setSaving(false);
+
+    if (!response.ok) {
+      return setError(
+        result.error || "Instalasi awal gagal.",
+      );
+    }
+
+    onComplete();
+  };
   return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">INSTALASI AWAL</span><h1>Siapkan akses panel pertama.</h1><p>Buat akun Administrator untuk mengamankan workspace deployment Anda.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Pendaftaran sekali saja</strong><small>Setelah selesai, pengguna baru dikelola dari panel</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">ADMINISTRATOR</span><h2>Buat akun utama</h2><p>Gunakan email aktif dan password kuat untuk akses pertama.</p></div><label><span>Nama</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Password</span><input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password</span><input required type="password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={saving}>{<ShieldCheck size={18} />}{saving ? "Menyiapkan akun..." : "Selesaikan instalasi"}</button></form></section></main>;
 }
 
