@@ -547,7 +547,13 @@ export async function restoreProjectDatabase(
      WHERE datname = '${metadata.database}'
        AND pid <> pg_backend_pid();`;
 
+  let restoreStep = "terminate_sessions";
+
   try {
+    console.log(
+      `POSTGRES_RESTORE_STEP project=${projectId} step=${restoreStep}`,
+    );
+
     await runner({
       image: "postgres:17-alpine",
       network: internalNetwork,
@@ -569,6 +575,12 @@ export async function restoreProjectDatabase(
       ],
     });
 
+    restoreStep = "drop_database";
+
+    console.log(
+      `POSTGRES_RESTORE_STEP project=${projectId} step=${restoreStep}`,
+    );
+
     await runner({
       image: "postgres:17-alpine",
       network: internalNetwork,
@@ -584,9 +596,16 @@ export async function restoreProjectDatabase(
       command: [
         "dropdb",
         "--if-exists",
+        "--force",
         metadata.database,
       ],
     });
+
+    restoreStep = "create_database";
+
+    console.log(
+      `POSTGRES_RESTORE_STEP project=${projectId} step=${restoreStep}`,
+    );
 
     await runner({
       image: "postgres:17-alpine",
@@ -607,6 +626,12 @@ export async function restoreProjectDatabase(
         metadata.database,
       ],
     });
+
+    restoreStep = "pg_restore";
+
+    console.log(
+      `POSTGRES_RESTORE_STEP project=${projectId} step=${restoreStep}`,
+    );
 
     await runner({
       image: "postgres:17-alpine",
@@ -632,9 +657,22 @@ export async function restoreProjectDatabase(
         'set -eu; pg_restore --exit-on-error --no-owner --no-acl --dbname="$PGDATABASE" "$NEXDEPLOY_RESTORE_SOURCE"',
       ],
     });
-  } catch {
+
+    console.log(
+      `POSTGRES_RESTORE_SUCCESS project=${projectId}`,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    console.error(
+      `POSTGRES_RESTORE_FAILED project=${projectId} step=${restoreStep} error=${message}`,
+    );
+
     throw new Error(
-      "Restore database PostgreSQL gagal setelah safety backup dibuat.",
+      `Restore database PostgreSQL gagal pada step ${restoreStep} setelah safety backup dibuat: ${message}`,
     );
   }
 

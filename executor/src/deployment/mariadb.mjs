@@ -482,6 +482,368 @@ export async function backupMariaDbProjectDatabase(
   };
 }
 
+
+export function validateMariaDbBackupFileName(
+  fileName,
+) {
+  if (
+    typeof fileName !== "string" ||
+    !/^\d{8}T\d{6}Z-(?:pre-migrate|pre-restore)\.sql$/.test(
+      fileName,
+    )
+  ) {
+    throw new Error(
+      "Nama file backup MariaDB tidak valid.",
+    );
+  }
+
+  return fileName;
+}
+
+export function mariaDbRestoreSafetyBackupFileName(
+  date = new Date(),
+) {
+  if (
+    !(date instanceof Date) ||
+    Number.isNaN(date.getTime())
+  ) {
+    throw new Error(
+      "Tanggal safety backup MariaDB tidak valid.",
+    );
+  }
+
+  const timestamp =
+    date
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}Z$/, "Z");
+
+  return `${timestamp}-pre-restore.sql`;
+}
+
+export async function restoreMariaDbProjectDatabase(
+  projectId,
+  metadata,
+  backupFileName,
+  config,
+  options = {},
+) {
+  validateMariaDbMetadata(
+    projectId,
+    metadata,
+    config,
+  );
+
+  validateMariaDbBackupFileName(
+    backupFileName,
+  );
+
+  const {
+    projectsDir,
+    projectsVolume,
+    mariadbHost,
+    mariadbPort,
+    rootPassword,
+    internalNetwork,
+  } = config;
+
+  if (
+    typeof projectsVolume !== "string" ||
+    !projectsVolume
+  ) {
+    throw new Error(
+      "Projects volume untuk restore MariaDB tidak tersedia.",
+    );
+  }
+
+  if (
+    !mariadbHost ||
+    !mariadbPort ||
+    !rootPassword
+  ) {
+    throw new Error(
+      "MariaDB admin configuration untuk restore tidak tersedia.",
+    );
+  }
+
+  const runner =
+    options.runner ??
+    runOneShot;
+
+  const now =
+    options.now ??
+    new Date();
+
+  const backupDir =
+    path.join(
+      projectsDir,
+      projectId,
+      "backups",
+      "database",
+    );
+
+  const sourcePath =
+    path.join(
+      backupDir,
+      backupFileName,
+    );
+
+  let sourceStat;
+
+  try {
+    sourceStat =
+      await fs.stat(
+        sourcePath,
+      );
+  } catch {
+    throw new Error(
+      "File backup MariaDB untuk restore tidak ditemukan.",
+    );
+  }
+
+  if (
+    !sourceStat.isFile() ||
+    sourceStat.size < 1
+  ) {
+    throw new Error(
+      "File backup MariaDB untuk restore kosong atau tidak valid.",
+    );
+  }
+
+  /*
+   * Validasi ringan source sebelum database disentuh.
+   * mariadb client harus bisa membaca seluruh SQL tanpa
+   * mengeksekusinya; minimal file harus non-empty dan
+   * tidak boleh mengandung NUL byte.
+   */
+  const sourceBuffer =
+    await fs.readFile(
+      sourcePath,
+    );
+
+  if (
+    sourceBuffer.includes(0)
+  ) {
+    throw new Error(
+      "File backup MariaDB mengandung data biner yang tidak valid.",
+    );
+  }
+
+  const safetyFileName =
+    mariaDbRestoreSafetyBackupFileName(
+      now,
+    );
+
+  const safetyPath =
+    path.join(
+      backupDir,
+      safetyFileName,
+    );
+
+  /*
+   * Safety backup kondisi database SAAT INI.
+   */
+  try {
+    await runner({
+      image:
+        "mariadb:11.4",
+
+      network:
+        internalNetwork,
+
+      env: {
+        MYSQL_PWD:
+          metadata.password,
+        NEXDEPLOY_BACKUP_PATH:
+          safetyPath,
+      },
+
+      volumes: [
+        `${projectsVolume}:${projectsDir}`,
+      ],
+
+      command: [
+        "sh",
+        "-lc",
+        [
+          "set -eu",
+          "umask 077",
+          [
+            "mariadb-dump",
+            `-h "${metadata.host}"`,
+            `-P "${metadata.port}"`,
+            `-u "${metadata.username}"`,
+            "--single-transaction",
+            "--quick",
+            "--routines",
+            "--triggers",
+            "--events",
+            `"${metadata.database}"`,
+            '> "$NEXDEPLOY_BACKUP_PATH"',
+          ].join(" "),
+          'test -s "$NEXDEPLOY_BACKUP_PATH"',
+        ].join("; "),
+      ],
+    });
+  } catch {
+    throw new Error(
+      "Safety backup MariaDB sebelum restore gagal.",
+    );
+  }
+
+  let safetyStat;
+
+  try {
+    safetyStat =
+      await fs.stat(
+        safetyPath,
+      );
+  } catch {
+    throw new Error(
+      "Safety backup MariaDB sebelum restore tidak ditemukan.",
+    );
+  }
+
+  if (
+    !safetyStat.isFile() ||
+    safetyStat.size < 1
+  ) {
+    throw new Error(
+      "Safety backup MariaDB sebelum restore kosong.",
+    );
+  }
+
+  /*
+   * Recreate database menggunakan root.
+   * User project tetap dipertahankan.
+   */
+  const recreateSql = [
+    `DROP DATABASE IF EXISTS \`${metadata.database}\`;`,
+    `CREATE DATABASE \`${metadata.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`,
+    `GRANT ALL PRIVILEGES ON \`${metadata.database}\`.* TO '${metadata.username}'@'%';`,
+    "FLUSH PRIVILEGES;",
+  ].join(" ");
+
+  try {
+    await runner({
+      image:
+        "mariadb:11.4",
+
+      network:
+        internalNetwork,
+
+      env: {
+        MYSQL_PWD:
+          rootPassword,
+      },
+
+      command: [
+        "mariadb",
+        "-h",
+        mariadbHost,
+        "-P",
+        String(
+          mariadbPort,
+        ),
+        "-uroot",
+        "-e",
+        recreateSql,
+      ],
+    });
+
+    /*
+     * Restore sebagai user project supaya privilege
+     * sesuai runtime aplikasi.
+     */
+    await runner({
+      image:
+        "mariadb:11.4",
+
+      network:
+        internalNetwork,
+
+      env: {
+        MYSQL_PWD:
+          metadata.password,
+        NEXDEPLOY_RESTORE_SOURCE:
+          sourcePath,
+      },
+
+      volumes: [
+        `${projectsVolume}:${projectsDir}`,
+      ],
+
+      command: [
+        "sh",
+        "-lc",
+        [
+          "set -eu",
+          [
+            "mariadb",
+            `-h "${metadata.host}"`,
+            `-P "${metadata.port}"`,
+            `-u "${metadata.username}"`,
+            `"${metadata.database}"`,
+            '< "$NEXDEPLOY_RESTORE_SOURCE"',
+          ].join(" "),
+        ].join("; "),
+      ],
+    });
+
+    /*
+     * Post-restore connection verification.
+     */
+    await runner({
+      image:
+        "mariadb:11.4",
+
+      network:
+        internalNetwork,
+
+      env: {
+        MYSQL_PWD:
+          metadata.password,
+      },
+
+      command: [
+        "mariadb",
+        "-h",
+        metadata.host,
+        "-P",
+        String(
+          metadata.port,
+        ),
+        "-u",
+        metadata.username,
+        metadata.database,
+        "-Nse",
+        "SELECT 1;",
+      ],
+    });
+  } catch {
+    throw new Error(
+      "Restore database MariaDB gagal setelah safety backup dibuat.",
+    );
+  }
+
+  return {
+    restoredFrom:
+      backupFileName,
+
+    safetyBackup:
+      safetyFileName,
+
+    safetyBackupSize:
+      safetyStat.size,
+
+    database:
+      metadata.database,
+
+    username:
+      metadata.username,
+  };
+}
+
 export async function dropMariaDbProjectDatabase(
   projectId,
   config,

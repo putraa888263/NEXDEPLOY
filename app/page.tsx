@@ -2244,7 +2244,7 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
   const restoreBackup = async (backup: Backup) => {
     if (
       !confirm(
-        `Pulihkan ${backup.name}? Tidak ada data yang diubah sebelum executor VPS tersedia.`,
+        `Pulihkan database dari ${backup.name}? Database saat ini akan dibackup otomatis sebelum proses restore.`,
       )
     ) {
       return;
@@ -2259,16 +2259,16 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
 
     if (!response.ok) {
       return notify(
-        result.error || "Restore gagal diantrikan.",
+        result.error || "Restore database gagal.",
       );
     }
 
     notify(
-      "Restore diantrikan dan menunggu executor VPS.",
+      "Database berhasil dipulihkan. Safety backup kondisi sebelumnya dibuat otomatis.",
     );
   };
   if (!project) return <section className="panel backup-page"><div className="panel-head"><div><h2>Backup terbaru</h2><p>Pilih project untuk melihat atau membuat backup.</p></div></div><div className="empty-state"><Archive size={28} /><h3>Backup per project</h3><p>Buka detail project, lalu pilih tab Backup.</p></div></section>;
-  return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>Backup {project.name}</h2><p>Retensi mengikuti pengaturan panel. Executor akan membuat file aplikasi dan database.</p></div>{canOperate && <button className="primary-btn" onClick={() => void createBackup()}><Plus size={17} />Buat backup</button>}</div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Jenis</span><span>Status</span><span>Dibuat</span><span /></div>{loading ? <div className="empty-state"><p>Memuat backup...</p></div> : backups.length ? backups.map((backup) => <div className="table-row" key={backup.id}><span className="backup-name"><Archive size={17} /><strong>{backup.name}</strong></span><span>{backup.type}</span><span
+  return <section className={`panel backup-page ${compact ? "compact-page" : ""}`}><div className="panel-head"><div><h2>Backup {project.name}</h2><p>Backup database dapat digunakan untuk pemulihan dengan safety backup otomatis sebelum restore.</p></div>{canOperate && <button className="primary-btn" onClick={() => void createBackup()}><Plus size={17} />Buat backup</button>}</div><div className="data-table backups"><div className="table-row head"><span>Nama backup</span><span>Jenis</span><span>Status</span><span>Dibuat</span><span /></div>{loading ? <div className="empty-state"><p>Memuat backup...</p></div> : backups.length ? backups.map((backup) => <div className="table-row" key={backup.id}><span className="backup-name"><Archive size={17} /><strong>{backup.name}</strong></span><span>{backup.type}</span><span
   className={`status ${
     backup.status === "Completed"
       ? "status-healthy"
@@ -2309,7 +2309,7 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
   </span>
 ) : (
   <span />
-)}</div>) : <div className="empty-state"><Archive size={26} /><h3>Belum ada backup</h3><p>Buat backup untuk menyiapkan pemulihan saat executor VPS tersedia.</p></div>}</div></section>;
+)}</div>) : <div className="empty-state"><Archive size={26} /><h3>Belum ada backup</h3><p>Buat backup database untuk menyiapkan titik pemulihan project.</p></div>}</div></section>;
 }
 
 function SettingsView({ notify, settings, onSave, onChangePassword, isAdmin }: { notify: (m: string) => void; settings: AppSettings; onSave: (s: AppSettings) => Promise<void>; onChangePassword: (currentPassword: string, newPassword: string) => Promise<string | null>; isAdmin: boolean }) {

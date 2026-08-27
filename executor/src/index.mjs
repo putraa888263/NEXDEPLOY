@@ -77,6 +77,7 @@ import {
 import {
   ensureProjectDatabase,
   backupProjectDatabase,
+  restoreProjectDatabase,
   dropProjectDatabase,
   loadProjectDatabaseMetadata,
 } from "./deployment/postgres.mjs";
@@ -84,6 +85,7 @@ import {
 import {
   ensureMariaDbProjectDatabase,
   backupMariaDbProjectDatabase,
+  restoreMariaDbProjectDatabase,
   dropMariaDbProjectDatabase,
   loadMariaDbMetadata,
 } from "./deployment/mariadb.mjs";
@@ -1907,6 +1909,130 @@ async function createManualDatabaseBackup({
 }
 
 
+
+async function restoreManualDatabaseBackup({
+  projectId,
+  databaseType,
+  backupFileName,
+}) {
+  if (
+    typeof backupFileName !== "string" ||
+    !backupFileName.trim()
+  ) {
+    throw new Error(
+      "Nama file backup untuk restore wajib diisi.",
+    );
+  }
+
+  const projectsDir =
+    process.env.PROJECTS_DIR ||
+    "/opt/nexdeploy/projects";
+
+  const projectsVolume =
+    process.env.PROJECTS_VOLUME ||
+    "nexdeploy_executor-projects";
+
+  const internalNetwork =
+    process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+    "nexdeploy_nexdeploy-internal";
+
+  if (databaseType === "PostgreSQL") {
+    const config = {
+      projectsDir,
+      projectsVolume,
+      internalNetwork,
+
+      postgresHost:
+        process.env.NEXDEPLOY_POSTGRES_HOST ||
+        "postgres",
+
+      postgresPort:
+        process.env.NEXDEPLOY_POSTGRES_PORT ||
+        "5432",
+
+      adminDb:
+        process.env.NEXDEPLOY_POSTGRES_DB ||
+        "postgres",
+
+      adminUser:
+        process.env.NEXDEPLOY_POSTGRES_USER,
+
+      adminPass:
+        process.env.NEXDEPLOY_POSTGRES_PASSWORD,
+    };
+
+    const metadata =
+      await loadProjectDatabaseMetadata(
+        projectsDir,
+        projectId,
+      );
+
+    if (!metadata) {
+      throw new Error(
+        "Metadata PostgreSQL project belum tersedia. Deploy project terlebih dahulu.",
+      );
+    }
+
+    return {
+      databaseType,
+
+      ...await restoreProjectDatabase(
+        projectId,
+        metadata,
+        backupFileName,
+        config,
+      ),
+    };
+  }
+
+  if (databaseType === "MariaDB") {
+    const config = {
+      projectsDir,
+      projectsVolume,
+      internalNetwork,
+
+      mariadbHost:
+        process.env.NEXDEPLOY_MARIADB_HOST ||
+        "mariadb",
+
+      mariadbPort:
+        process.env.NEXDEPLOY_MARIADB_PORT ||
+        "3306",
+
+      rootPassword:
+        process.env.NEXDEPLOY_MARIADB_ROOT_PASSWORD,
+    };
+
+    const metadata =
+      await loadMariaDbMetadata(
+        projectsDir,
+        projectId,
+      );
+
+    if (!metadata) {
+      throw new Error(
+        "Metadata MariaDB project belum tersedia. Deploy project terlebih dahulu.",
+      );
+    }
+
+    return {
+      databaseType,
+
+      ...await restoreMariaDbProjectDatabase(
+        projectId,
+        metadata,
+        backupFileName,
+        config,
+      ),
+    };
+  }
+
+  throw new Error(
+    `Database type restore tidak didukung: ${databaseType}.`,
+  );
+}
+
+
 async function permanentlyCleanupProject(
   payload,
 ) {
@@ -3224,6 +3350,107 @@ const server =
             );
           }
         }
+
+        const databaseRestoreMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/database\/restore$/,
+          );
+
+        if (
+          request.method ===
+            "POST" &&
+          databaseRestoreMatch
+        ) {
+          if (
+            !authorized(
+              request,
+            )
+          ) {
+            return json(
+              response,
+              401,
+              {
+                error:
+                  "Unauthorized.",
+              },
+            );
+          }
+
+          const projectId =
+            databaseRestoreMatch[1];
+
+          const payload =
+            await body(
+              request,
+            );
+
+          if (
+            ![
+              "MariaDB",
+              "PostgreSQL",
+            ].includes(
+              payload.databaseType,
+            )
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "databaseType restore tidak valid.",
+              },
+            );
+          }
+
+          if (
+            typeof payload.backupFileName !==
+              "string" ||
+            !payload.backupFileName.trim()
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "backupFileName restore wajib diisi.",
+              },
+            );
+          }
+
+          try {
+            const restore =
+              await restoreManualDatabaseBackup({
+                projectId,
+                databaseType:
+                  payload.databaseType,
+                backupFileName:
+                  payload.backupFileName,
+              });
+
+            return json(
+              response,
+              200,
+              {
+                ok: true,
+                restore,
+              },
+            );
+          } catch (error) {
+            return json(
+              response,
+              500,
+              {
+                error:
+                  sanitizeLogMessage(
+                    error instanceof Error
+                      ? error.message
+                      : "Restore database gagal.",
+                  ),
+              },
+            );
+          }
+        }
+
 
         const databaseBackupMatch =
           url.pathname.match(
