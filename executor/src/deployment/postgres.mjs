@@ -721,39 +721,84 @@ export async function dropProjectDatabase(
     );
   }
 
+  const adminEnv = {
+    PGHOST:
+      postgresHost,
+    PGPORT:
+      postgresPort,
+    PGDATABASE:
+      adminDb,
+    PGUSER:
+      adminUser,
+    PGPASSWORD:
+      adminPass,
+  };
+
+  console.log(
+    `POSTGRES_DROP_STEP project=${projectId} step=terminate_sessions`,
+  );
+
   await runOneShot({
     image:
       "postgres:17-alpine",
     network:
       internalNetwork,
-    env: {
-      PGHOST:
-        postgresHost,
-      PGPORT:
-        postgresPort,
-      PGDATABASE:
-        adminDb,
-      PGUSER:
-        adminUser,
-      PGPASSWORD:
-        adminPass,
-    },
+    env:
+      adminEnv,
     command: [
       "psql",
       "-v",
       "ON_ERROR_STOP=1",
       "-c",
-      `
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE datname = '${database}'
-  AND pid <> pg_backend_pid();
-
-DROP DATABASE IF EXISTS "${database}";
-DROP ROLE IF EXISTS "${username}";
-      `.trim(),
+      `SELECT pg_terminate_backend(pid)
+       FROM pg_stat_activity
+       WHERE datname = '${database}'
+         AND pid <> pg_backend_pid();`,
     ],
   });
+
+  console.log(
+    `POSTGRES_DROP_STEP project=${projectId} step=drop_database`,
+  );
+
+  await runOneShot({
+    image:
+      "postgres:17-alpine",
+    network:
+      internalNetwork,
+    env:
+      adminEnv,
+    command: [
+      "dropdb",
+      "--if-exists",
+      "--force",
+      database,
+    ],
+  });
+
+  console.log(
+    `POSTGRES_DROP_STEP project=${projectId} step=drop_role`,
+  );
+
+  await runOneShot({
+    image:
+      "postgres:17-alpine",
+    network:
+      internalNetwork,
+    env:
+      adminEnv,
+    command: [
+      "psql",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `DROP ROLE IF EXISTS "${username}";`,
+    ],
+  });
+
+  console.log(
+    `POSTGRES_DROP_SUCCESS project=${projectId}`,
+  );
 
   return {
     database,
