@@ -2099,9 +2099,231 @@ useEffect(() => { void fetch(`/api/projects/${project.id}/resources`).then((resp
 
 function DatabaseTab({ project, notify, canOperate }: { project: Project; notify: (m: string) => void; canOperate: boolean }) {
   const database = project.database || "MariaDB";
-  if (database === "Tanpa database") return <section className="panel empty-state"><Database size={28} /><h3>Project ini tanpa database</h3><p>Pilihan tersebut ditentukan saat project dibuat.</p></section>;
-  const isPostgres = database === "PostgreSQL";
-  return <div className="database-grid"><section className="panel database-card"><div className="database-logo"><Database size={26} /></div><div><span className="success-label"><i />Terhubung</span><h2>{database} {isPostgres ? "16" : "11.4"}</h2><p>Database terisolasi khusus untuk project ini.</p></div><dl><div><dt>Host</dt><dd>nexdeploy-{project.slug}-db</dd></div><div><dt>Database</dt><dd>{project.slug.replace(/-/g, "_")}_db</dd></div><div><dt>Port</dt><dd>{isPostgres ? "5432" : "3306"}</dd></div></dl><button className="secondary-btn" onClick={() => { navigator.clipboard?.writeText(`DB_HOST=nexdeploy-${project.slug}-db\nDB_DATABASE=${project.slug.replace(/-/g, "_")}_db`); notify("Kredensial database disalin"); }}><Copy size={16} />Salin kredensial</button></section><section className="panel database-actions"><h2>Pemeliharaan</h2><button disabled={!canOperate} onClick={() => notify("Backup database dimulai")}><Archive size={19} /><span><strong>Backup sekarang</strong><small>Buat salinan database terbaru</small></span><ChevronLeft className="rotate" size={17} /></button><button onClick={() => notify("Koneksi database berhasil")}><Activity size={19} /><span><strong>Uji koneksi</strong><small>Pastikan aplikasi tetap terhubung</small></span><ChevronLeft className="rotate" size={17} /></button></section></div>;
+  const [testing, setTesting] = useState(false);
+  const [connection, setConnection] = useState<{
+    databaseType?: string;
+    database?: string;
+    host?: string;
+    port?: number;
+    latencyMs?: number;
+  } | null>(null);
+  const [connectionError, setConnectionError] = useState("");
+
+  if (database === "Tanpa database") {
+    return (
+      <section className="panel empty-state">
+        <Database size={28} />
+        <h3>Project ini tanpa database</h3>
+        <p>Pilihan tersebut ditentukan saat project dibuat.</p>
+      </section>
+    );
+  }
+
+  const isPostgres =
+    database === "PostgreSQL";
+
+  const testConnection =
+    async () => {
+      if (!canOperate || testing) {
+        return;
+      }
+
+      setTesting(true);
+      setConnectionError("");
+
+      try {
+        const response =
+          await fetch(
+            `/api/projects/${project.id}/database/test`,
+            {
+              method: "POST",
+            },
+          );
+
+        const result =
+          await response
+            .json()
+            .catch(() => ({}));
+
+        if (
+          !response.ok ||
+          !result.ok ||
+          !result.connection
+        ) {
+          throw new Error(
+            result.error ||
+              "Test koneksi database gagal.",
+          );
+        }
+
+        setConnection(
+          result.connection,
+        );
+
+        notify(
+          `Koneksi ${database} berhasil · ${result.connection.latencyMs ?? 0} ms`,
+        );
+      } catch (error) {
+        setConnection(null);
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Test koneksi database gagal.";
+
+        setConnectionError(
+          message,
+        );
+
+        notify(
+          message,
+        );
+      } finally {
+        setTesting(false);
+      }
+    };
+
+  const displayedHost =
+    connection?.host ||
+    "Belum diuji";
+
+  const displayedDatabase =
+    connection?.database ||
+    "Belum diuji";
+
+  const displayedPort =
+    connection?.port ||
+    (isPostgres
+      ? 5432
+      : 3306);
+
+  return (
+    <div className="database-grid">
+      <section className="panel database-card">
+        <div className="database-logo">
+          <Database size={26} />
+        </div>
+
+        <div>
+          {connection ? (
+            <span className="success-label">
+              <i />
+              Terhubung · {connection.latencyMs ?? 0} ms
+            </span>
+          ) : (
+            <span>
+              {connectionError
+                ? "Koneksi gagal"
+                : "Belum diuji"}
+            </span>
+          )}
+
+          <h2>
+            {database} {isPostgres ? "17" : "11.4"}
+          </h2>
+
+          <p>
+            Database terisolasi khusus untuk project ini.
+          </p>
+
+          {connectionError && (
+            <p className="login-error environment-error">
+              {connectionError}
+            </p>
+          )}
+        </div>
+
+        <dl>
+          <div>
+            <dt>Host</dt>
+            <dd>{displayedHost}</dd>
+          </div>
+
+          <div>
+            <dt>Database</dt>
+            <dd>{displayedDatabase}</dd>
+          </div>
+
+          <div>
+            <dt>Port</dt>
+            <dd>{displayedPort}</dd>
+          </div>
+        </dl>
+
+        <button
+          className="secondary-btn"
+          disabled={!connection}
+          onClick={() => {
+            if (!connection) {
+              return;
+            }
+
+            navigator.clipboard?.writeText(
+              `DB_HOST=${connection.host ?? ""}\nDB_PORT=${connection.port ?? ""}\nDB_DATABASE=${connection.database ?? ""}`,
+            );
+
+            notify(
+              "Informasi koneksi database disalin",
+            );
+          }}
+        >
+          <Copy size={16} />
+          Salin informasi koneksi
+        </button>
+      </section>
+
+      <section className="panel database-actions">
+        <h2>Pemeliharaan</h2>
+
+        <button
+          disabled={!canOperate}
+          onClick={() =>
+            notify(
+              "Gunakan menu Backup untuk membuat backup database.",
+            )
+          }
+        >
+          <Archive size={19} />
+          <span>
+            <strong>Backup sekarang</strong>
+            <small>
+              Buat salinan database terbaru
+            </small>
+          </span>
+          <ChevronLeft
+            className="rotate"
+            size={17}
+          />
+        </button>
+
+        <button
+          disabled={!canOperate || testing}
+          onClick={() =>
+            void testConnection()
+          }
+        >
+          <Activity size={19} />
+          <span>
+            <strong>
+              {testing
+                ? "Menguji koneksi..."
+                : "Uji koneksi"}
+            </strong>
+            <small>
+              {connection
+                ? `Terhubung · ${connection.latencyMs ?? 0} ms`
+                : "Pastikan database dapat diakses"}
+            </small>
+          </span>
+
+          <ChevronLeft
+            className="rotate"
+            size={17}
+          />
+        </button>
+      </section>
+    </div>
+  );
 }
 
 function ActivityView() {

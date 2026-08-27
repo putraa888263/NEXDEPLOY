@@ -1910,6 +1910,159 @@ async function createManualDatabaseBackup({
 
 
 
+
+async function testDatabaseConnection({
+  projectId,
+  databaseType,
+}) {
+  const projectsDir =
+    process.env.PROJECTS_DIR ||
+    "/opt/nexdeploy/projects";
+
+  const internalNetwork =
+    process.env.NEXDEPLOY_INTERNAL_NETWORK ||
+    "nexdeploy_nexdeploy-internal";
+
+  if (databaseType === "PostgreSQL") {
+    const metadata =
+      await loadProjectDatabaseMetadata(
+        projectsDir,
+        projectId,
+      );
+
+    if (!metadata) {
+      throw new Error(
+        "Metadata PostgreSQL project belum tersedia. Deploy project terlebih dahulu.",
+      );
+    }
+
+    const startedAt =
+      performance.now();
+
+    await runOneShot({
+      image:
+        "postgres:17-alpine",
+      network:
+        internalNetwork,
+
+      env: {
+        PGHOST:
+          metadata.host,
+        PGPORT:
+          String(metadata.port),
+        PGDATABASE:
+          metadata.database,
+        PGUSER:
+          metadata.username,
+        PGPASSWORD:
+          metadata.password,
+      },
+
+      command: [
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-tAc",
+        "SELECT 1;",
+      ],
+    });
+
+    const latencyMs =
+      Math.max(
+        0,
+        Math.round(
+          performance.now() -
+            startedAt,
+        ),
+      );
+
+    return {
+      databaseType,
+      database:
+        metadata.database,
+      host:
+        metadata.host,
+      port:
+        Number(
+          metadata.port,
+        ),
+      latencyMs,
+    };
+  }
+
+  if (databaseType === "MariaDB") {
+    const metadata =
+      await loadMariaDbMetadata(
+        projectsDir,
+        projectId,
+      );
+
+    if (!metadata) {
+      throw new Error(
+        "Metadata MariaDB project belum tersedia. Deploy project terlebih dahulu.",
+      );
+    }
+
+    const startedAt =
+      performance.now();
+
+    await runOneShot({
+      image:
+        "mariadb:11.4",
+      network:
+        internalNetwork,
+
+      env: {
+        MYSQL_PWD:
+          metadata.password,
+      },
+
+      command: [
+        "mariadb",
+        "-h",
+        metadata.host,
+        "-P",
+        String(
+          metadata.port,
+        ),
+        "-u",
+        metadata.username,
+        "-D",
+        metadata.database,
+        "-Nse",
+        "SELECT 1;",
+      ],
+    });
+
+    const latencyMs =
+      Math.max(
+        0,
+        Math.round(
+          performance.now() -
+            startedAt,
+        ),
+      );
+
+    return {
+      databaseType,
+      database:
+        metadata.database,
+      host:
+        metadata.host,
+      port:
+        Number(
+          metadata.port,
+        ),
+      latencyMs,
+    };
+  }
+
+  throw new Error(
+    `Database type tidak didukung: ${databaseType}.`,
+  );
+}
+
+
 async function restoreManualDatabaseBackup({
   projectId,
   databaseType,
@@ -3350,6 +3503,87 @@ const server =
             );
           }
         }
+
+        const databaseTestMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/database\/test$/,
+          );
+
+        if (
+          request.method ===
+            "POST" &&
+          databaseTestMatch
+        ) {
+          if (!authorized(request)) {
+            return json(
+              response,
+              401,
+              {
+                error:
+                  "Unauthorized.",
+              },
+            );
+          }
+
+          const projectId =
+            databaseTestMatch[1];
+
+          const payload =
+            await body(
+              request,
+            );
+
+          if (
+            ![
+              "MariaDB",
+              "PostgreSQL",
+            ].includes(
+              payload.databaseType,
+            )
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "databaseType test tidak valid.",
+              },
+            );
+          }
+
+          try {
+            const connection =
+              await testDatabaseConnection({
+                projectId,
+                databaseType:
+                  payload.databaseType,
+              });
+
+            return json(
+              response,
+              200,
+              {
+                ok: true,
+                connection,
+              },
+            );
+          } catch (error) {
+            return json(
+              response,
+              500,
+              {
+                ok: false,
+                error:
+                  sanitizeLogMessage(
+                    error instanceof Error
+                      ? error.message
+                      : "Test koneksi database gagal.",
+                  ),
+              },
+            );
+          }
+        }
+
 
         const databaseRestoreMatch =
           url.pathname.match(
