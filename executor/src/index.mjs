@@ -2862,6 +2862,95 @@ async function getProjectRuntimeContainers(projectSlug) {
   };
 }
 
+
+async function getProjectContainerLogs({
+  projectSlug,
+  service,
+  tail,
+}) {
+  const runtime =
+    await getProjectRuntimeContainers(
+      projectSlug,
+    );
+
+  if (
+    ![
+      "app",
+      "worker",
+      "scheduler",
+    ].includes(service)
+  ) {
+    throw new Error(
+      "Service log tidak valid.",
+    );
+  }
+
+  const safeTail =
+    Number.isInteger(tail)
+      ? Math.min(
+          500,
+          Math.max(
+            20,
+            tail,
+          ),
+        )
+      : 200;
+
+  let container =
+    null;
+
+  if (service === "app") {
+    container =
+      runtime.app;
+  }
+
+  if (service === "worker") {
+    container =
+      runtime.background.find(
+        (name) =>
+          name.endsWith("-worker"),
+      ) ?? null;
+  }
+
+  if (service === "scheduler") {
+    container =
+      runtime.background.find(
+        (name) =>
+          name.endsWith("-scheduler"),
+      ) ?? null;
+  }
+
+  if (!container) {
+    throw new Error(
+      `Container ${service} project tidak ditemukan.`,
+    );
+  }
+
+  const running =
+    await containerRunning(
+      container,
+    );
+
+  const rawLogs =
+    await diagnoseContainer(
+      container,
+      safeTail,
+    );
+
+  return {
+    service,
+    container,
+    running,
+    tail:
+      safeTail,
+    logs:
+      sanitizeLogMessage(
+        rawLogs,
+      ),
+  };
+}
+
+
 async function getProjectRuntimeStatus(projectSlug) {
   const runtime =
     await getProjectRuntimeContainers(
@@ -3255,6 +3344,118 @@ const server =
             );
           }
         }
+
+        const projectLogsMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/logs$/,
+          );
+
+        if (
+          request.method ===
+            "GET" &&
+          projectLogsMatch
+        ) {
+          if (!authorized(request)) {
+            return json(
+              response,
+              401,
+              {
+                error:
+                  "Unauthorized.",
+              },
+            );
+          }
+
+          const projectId =
+            projectLogsMatch[1];
+
+          const projectSlug =
+            url.searchParams.get(
+              "projectSlug",
+            );
+
+          const service =
+            url.searchParams.get(
+              "service",
+            ) || "app";
+
+          const tailParam =
+            Number(
+              url.searchParams.get(
+                "tail",
+              ) || "200",
+            );
+
+          if (!projectSlug) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "projectSlug wajib diisi.",
+              },
+            );
+          }
+
+          if (
+            ![
+              "app",
+              "worker",
+              "scheduler",
+            ].includes(service)
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "service log tidak valid.",
+              },
+            );
+          }
+
+          const tail =
+            Number.isFinite(
+              tailParam,
+            )
+              ? Math.trunc(
+                  tailParam,
+                )
+              : 200;
+
+          try {
+            const result =
+              await getProjectContainerLogs({
+                projectSlug,
+                service,
+                tail,
+              });
+
+            return json(
+              response,
+              200,
+              {
+                ok: true,
+                projectId,
+                ...result,
+              },
+            );
+          } catch (error) {
+            return json(
+              response,
+              404,
+              {
+                error:
+                  sanitizeLogMessage(
+                    error instanceof Error
+                      ? error.message
+                      : "Log container project tidak tersedia.",
+                  ),
+              },
+            );
+          }
+        }
+
 
         const projectRuntimeStatusMatch =
           url.pathname.match(

@@ -1300,7 +1300,7 @@ function ProjectDetail({
       )}
 
       {tab === "logs" && (
-        <LogPanel
+        <ContainerLogPanel
           projectId={project.id}
         />
       )}
@@ -1501,6 +1501,347 @@ function deploymentHasFinalLog(
 
   return false;
 }
+
+
+function ContainerLogPanel({
+  projectId,
+}: {
+  projectId: string;
+}) {
+  type LogService =
+    | "app"
+    | "worker"
+    | "scheduler";
+
+  type RuntimeLogResult = {
+    ok?: boolean;
+    service?: LogService;
+    container?: string;
+    running?: boolean;
+    tail?: number;
+    logs?: string;
+    error?: string;
+  };
+
+  const [service, setService] =
+    useState<LogService>("app");
+
+  const [result, setResult] =
+    useState<RuntimeLogResult | null>(
+      null,
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  const terminalRef =
+    useRef<HTMLPreElement | null>(
+      null,
+    );
+
+  const load =
+    useCallback(async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const response =
+          await fetch(
+            `/api/projects/${projectId}/logs?service=${service}&tail=200`,
+            {
+              cache:
+                "no-store",
+            },
+          );
+
+        const data =
+          await response
+            .json()
+            .catch(() => ({})) as RuntimeLogResult;
+
+        if (
+          !response.ok ||
+          !data.ok
+        ) {
+          throw new Error(
+            data.error ||
+              "Log container gagal dibaca.",
+          );
+        }
+
+        setResult(data);
+      } catch (loadError) {
+        setResult(null);
+
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Log container gagal dibaca.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }, [
+      projectId,
+      service,
+    ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run =
+      async () => {
+        setLoading(true);
+        setError("");
+
+        try {
+          const response =
+            await fetch(
+              `/api/projects/${projectId}/logs?service=${service}&tail=200`,
+              {
+                cache:
+                  "no-store",
+              },
+            );
+
+          const data =
+            await response
+              .json()
+              .catch(() => ({})) as RuntimeLogResult;
+
+          if (
+            !response.ok ||
+            !data.ok
+          ) {
+            throw new Error(
+              data.error ||
+                "Log container gagal dibaca.",
+            );
+          }
+
+          if (!cancelled) {
+            setResult(data);
+          }
+        } catch (loadError) {
+          if (!cancelled) {
+            setResult(null);
+
+            setError(
+              loadError instanceof Error
+                ? loadError.message
+                : "Log container gagal dibaca.",
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        }
+      };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    projectId,
+    service,
+  ]);
+
+  useEffect(() => {
+    const terminal =
+      terminalRef.current;
+
+    if (!terminal) {
+      return;
+    }
+
+    terminal.scrollTop =
+      terminal.scrollHeight;
+  }, [result?.logs]);
+
+  const services: Array<{
+    id: LogService;
+    label: string;
+  }> = [
+    {
+      id: "app",
+      label: "App",
+    },
+    {
+      id: "worker",
+      label: "Worker",
+    },
+    {
+      id: "scheduler",
+      label: "Scheduler",
+    },
+  ];
+
+  return (
+    <section className="panel log-panel">
+      <div
+        className="panel-head dark"
+        style={{
+          background:
+            "#111827",
+          borderBottom:
+            "1px solid #263244",
+        }}
+      >
+        <div>
+          <h2>Container logs</h2>
+
+          <p>
+            {result?.container ||
+              "Runtime project"}
+          </p>
+        </div>
+
+        <span
+          className={
+            result &&
+            !result.running
+              ? "error"
+              : ""
+          }
+        >
+          <i />
+          {loading
+            ? "Memuat"
+            : result?.running
+              ? "Running"
+              : result
+                ? "Stopped"
+                : "Tidak tersedia"}
+        </span>
+      </div>
+
+      <div
+        className="activity-filters"
+        style={{
+          margin:
+            "16px 16px 0",
+        }}
+      >
+        {services.map(
+          (item) => (
+            <button
+              key={item.id}
+              className={
+                service ===
+                item.id
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setService(
+                  item.id,
+                )
+              }
+            >
+              {item.label}
+            </button>
+          ),
+        )}
+
+        <button
+          onClick={() =>
+            void load()
+          }
+          disabled={loading}
+        >
+          {loading
+            ? "Memuat..."
+            : "Refresh"}
+        </button>
+      </div>
+
+      {error ? (
+        <div
+          className="empty-state"
+          style={{
+            minHeight:
+              "260px",
+          }}
+        >
+          <Activity size={28} />
+
+          <h3>
+            Log tidak tersedia
+          </h3>
+
+          <p>{error}</p>
+        </div>
+      ) : (
+        <pre
+          ref={terminalRef}
+          style={{
+            margin:
+              "16px",
+            padding:
+              "20px",
+            minHeight:
+              "420px",
+            maxHeight:
+              "620px",
+            overflow:
+              "auto",
+            whiteSpace:
+              "pre-wrap",
+            wordBreak:
+              "break-word",
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            fontSize:
+              "13px",
+            lineHeight:
+              1.65,
+            background:
+              "#090d14",
+            color:
+              "#e8edf5",
+            border:
+              "1px solid #263244",
+            borderRadius:
+              "12px",
+            boxShadow:
+              "inset 0 0 0 1px rgba(255,255,255,0.025)",
+            textShadow:
+              "0 0 1px rgba(255,255,255,0.15)",
+          }}
+        >
+          {loading
+            ? "Memuat log container..."
+            : result?.logs ||
+              `Belum ada output pada ${service}.`}
+        </pre>
+      )}
+
+      {result && (
+        <div
+          style={{
+            padding:
+              "0 20px 18px",
+            opacity:
+              0.7,
+            fontSize:
+              "12px",
+          }}
+        >
+          Menampilkan maksimal{" "}
+          {result.tail ?? 200} baris
+          terakhir · {service}
+        </div>
+      )}
+    </section>
+  );
+}
+
 
 function LogPanel({
   compact = false,
