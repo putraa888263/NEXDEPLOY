@@ -274,6 +274,7 @@ export async function POST(
           fileName?: string;
           path?: string;
           size?: number;
+          prunedFiles?: string[];
         };
         error?: string;
       };
@@ -286,6 +287,35 @@ export async function POST(
         result.error ||
         "Executor gagal membuat backup database.",
       );
+    }
+
+    const prunedFiles =
+      Array.isArray(
+        result.backup.prunedFiles,
+      )
+        ? result.backup.prunedFiles.filter(
+            (fileName): fileName is string =>
+              typeof fileName === "string" &&
+              fileName.length > 0,
+          )
+        : [];
+
+    for (const prunedFile of prunedFiles) {
+      await getD1()
+        .prepare(
+          `
+            DELETE FROM backups
+            WHERE project_id = ?
+              AND file_name = ?
+              AND id <> ?
+          `,
+        )
+        .bind(
+          id,
+          prunedFile,
+          backup.id,
+        )
+        .run();
     }
 
     const completedAt =

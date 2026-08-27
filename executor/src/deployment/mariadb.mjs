@@ -479,6 +479,8 @@ export async function backupMariaDbProjectDatabase(
       outputPath,
     size:
       backupStat.size,
+    prunedFiles:
+      expired,
   };
 }
 

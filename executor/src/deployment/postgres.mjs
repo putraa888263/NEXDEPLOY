@@ -330,6 +330,8 @@ export async function backupProjectDatabase(
     fileName,
     path: backupPath,
     size: backupStat.size,
+    prunedFiles:
+      expired,
   };
 }
 export function validateDatabaseBackupFileName(fileName) {
