@@ -1526,6 +1526,12 @@ function ContainerLogPanel({
   const [service, setService] =
     useState<LogService>("app");
 
+  const [tail, setTail] =
+    useState(200);
+
+  const [autoRefresh, setAutoRefresh] =
+    useState(false);
+
   const [result, setResult] =
     useState<RuntimeLogResult | null>(
       null,
@@ -1550,7 +1556,7 @@ function ContainerLogPanel({
       try {
         const response =
           await fetch(
-            `/api/projects/${projectId}/logs?service=${service}&tail=200`,
+            `/api/projects/${projectId}/logs?service=${service}&tail=${tail}`,
             {
               cache:
                 "no-store",
@@ -1587,6 +1593,7 @@ function ContainerLogPanel({
     }, [
       projectId,
       service,
+      tail,
     ]);
 
   useEffect(() => {
@@ -1600,7 +1607,7 @@ function ContainerLogPanel({
         try {
           const response =
             await fetch(
-              `/api/projects/${projectId}/logs?service=${service}&tail=200`,
+              `/api/projects/${projectId}/logs?service=${service}&tail=${tail}`,
               {
                 cache:
                   "no-store",
@@ -1650,6 +1657,27 @@ function ContainerLogPanel({
   }, [
     projectId,
     service,
+    tail,
+  ]);
+
+  useEffect(() => {
+    if (!autoRefresh) {
+      return;
+    }
+
+    const timer =
+      window.setInterval(
+        () => void load(),
+        5000,
+      );
+
+    return () =>
+      window.clearInterval(
+        timer,
+      );
+  }, [
+    autoRefresh,
+    load,
   ]);
 
   useEffect(() => {
@@ -1681,6 +1709,37 @@ function ContainerLogPanel({
       label: "Scheduler",
     },
   ];
+
+  const logLines =
+    useMemo(
+      () =>
+        (result?.logs || "")
+          .split(/\r?\n/)
+          .filter((line) => line.trim()),
+      [result?.logs],
+    );
+
+  const errorLines =
+    useMemo(
+      () =>
+        logLines.filter((line) =>
+          /\b(error|failed|exception|fatal)\b/i.test(
+            line,
+          ),
+        ).length,
+      [logLines],
+    );
+
+  const copyLogs =
+    async () => {
+      if (!result?.logs) {
+        return;
+      }
+
+      await navigator.clipboard?.writeText(
+        result.logs,
+      );
+    };
 
   return (
     <section className="panel log-panel">
@@ -1726,6 +1785,10 @@ function ContainerLogPanel({
         style={{
           margin:
             "16px 16px 0",
+          alignItems:
+            "center",
+          flexWrap:
+            "wrap",
         }}
       >
         {services.map(
@@ -1749,6 +1812,44 @@ function ContainerLogPanel({
           ),
         )}
 
+        <select
+          value={tail}
+          onChange={(event) =>
+            setTail(
+              Number(
+                event.target.value,
+              ),
+            )
+          }
+          aria-label="Jumlah baris log"
+        >
+          <option value={100}>100 baris</option>
+          <option value={200}>200 baris</option>
+          <option value={500}>500 baris</option>
+        </select>
+
+        <label className="log-auto-refresh">
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(event) =>
+              setAutoRefresh(
+                event.target.checked,
+              )
+            }
+          />
+          Auto
+        </label>
+
+        <button
+          onClick={() =>
+            void copyLogs()
+          }
+          disabled={!result?.logs}
+        >
+          Salin
+        </button>
+
         <button
           onClick={() =>
             void load()
@@ -1760,6 +1861,14 @@ function ContainerLogPanel({
             : "Refresh"}
         </button>
       </div>
+
+      {result && (
+        <div className="container-log-summary">
+          <span>{logLines.length} baris</span>
+          <span>{errorLines} indikasi error</span>
+          <span>{service}</span>
+        </div>
+      )}
 
       {error ? (
         <div
@@ -2441,6 +2550,7 @@ useEffect(() => { void fetch(`/api/projects/${project.id}/resources`).then((resp
 function DatabaseTab({ project, notify, canOperate }: { project: Project; notify: (m: string) => void; canOperate: boolean }) {
   const database = project.database || "MariaDB";
   const [testing, setTesting] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   const [connection, setConnection] = useState<{
     databaseType?: string;
     database?: string;
@@ -2521,6 +2631,57 @@ function DatabaseTab({ project, notify, canOperate }: { project: Project; notify
         );
       } finally {
         setTesting(false);
+      }
+    };
+
+  const createBackup =
+    async () => {
+      if (!canOperate || backingUp) {
+        return;
+      }
+
+      if (!project.hasSuccessfulDeployment) {
+        return notify(
+          "Project harus berhasil dideploy sebelum database dapat dibackup.",
+        );
+      }
+
+      setBackingUp(true);
+
+      try {
+        const response =
+          await fetch(
+            `/api/projects/${project.id}/backups`,
+            {
+              method: "POST",
+            },
+          );
+
+        const result =
+          await response
+            .json()
+            .catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(
+            result.error ||
+              "Backup database gagal dibuat.",
+          );
+        }
+
+        notify(
+          result.backup?.status === "Completed"
+            ? "Backup database berhasil dibuat."
+            : "Permintaan backup diterima.",
+        );
+      } catch (error) {
+        notify(
+          error instanceof Error
+            ? error.message
+            : "Backup database gagal dibuat.",
+        );
+      } finally {
+        setBackingUp(false);
       }
     };
 
@@ -2617,18 +2778,26 @@ function DatabaseTab({ project, notify, canOperate }: { project: Project; notify
         <h2>Pemeliharaan</h2>
 
         <button
-          disabled={!canOperate}
+          disabled={
+            !canOperate ||
+            backingUp ||
+            !project.hasSuccessfulDeployment
+          }
           onClick={() =>
-            notify(
-              "Gunakan menu Backup untuk membuat backup database.",
-            )
+            void createBackup()
           }
         >
           <Archive size={19} />
           <span>
-            <strong>Backup sekarang</strong>
+            <strong>
+              {backingUp
+                ? "Membuat backup..."
+                : "Backup sekarang"}
+            </strong>
             <small>
-              Buat salinan database terbaru
+              {project.hasSuccessfulDeployment
+                ? "Buat salinan database terbaru"
+                : "Deploy project terlebih dahulu"}
             </small>
           </span>
           <ChevronLeft

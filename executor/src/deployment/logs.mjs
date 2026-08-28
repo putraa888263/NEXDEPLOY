@@ -7,6 +7,10 @@ export function sanitizeLogMessage(value) {
 
   return message
     .replace(
+      /([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s/@]+):([^@\s]+)@/g,
+      "$1:[REDACTED]@",
+    )
+    .replace(
       /\b(authorization)\s*:\s*bearer\s+[^\s,;]+/gi,
       "$1: Bearer [REDACTED]",
     )
@@ -15,7 +19,7 @@ export function sanitizeLogMessage(value) {
       "Bearer [REDACTED]",
     )
     .replace(
-      /\b(APP_KEY|DB_PASSWORD|DB_USERNAME|DATABASE_URL|REDIS_PASSWORD|MAIL_PASSWORD|API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/gi,
+      /\b([A-Z0-9_]*(?:APP_KEY|API_KEY|PASSWORD|PASSWD|TOKEN|SECRET|PRIVATE_KEY|CREDENTIAL|DATABASE_URL|MYSQL_PWD|PGPASSWORD)[A-Z0-9_]*)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/gi,
       "$1=[REDACTED]",
     )
     .replace(

@@ -301,6 +301,54 @@ export async function POST(
         : [];
 
     for (const prunedFile of prunedFiles) {
+      const prunedBackups =
+        await getD1()
+          .prepare(
+            `
+              SELECT id
+              FROM backups
+              WHERE project_id = ?
+                AND file_name = ?
+                AND id <> ?
+            `,
+          )
+          .bind(
+            id,
+            prunedFile,
+            backup.id,
+          )
+          .all<{ id: string }>();
+
+      for (const prunedBackup of prunedBackups.results ?? []) {
+        await getD1()
+          .prepare(
+            `
+              DELETE FROM backup_logs
+              WHERE job_id IN (
+                SELECT id
+                FROM backup_jobs
+                WHERE backup_id = ?
+              )
+            `,
+          )
+          .bind(
+            prunedBackup.id,
+          )
+          .run();
+
+        await getD1()
+          .prepare(
+            `
+              DELETE FROM backup_jobs
+              WHERE backup_id = ?
+            `,
+          )
+          .bind(
+            prunedBackup.id,
+          )
+          .run();
+      }
+
       await getD1()
         .prepare(
           `
@@ -500,4 +548,3 @@ export async function POST(
     );
   }
 }
-

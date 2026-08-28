@@ -52,6 +52,47 @@ test("sanitizeLogMessage redacts bearer authorization", () => {
   );
 });
 
+test("sanitizeLogMessage redacts generic env secrets and URL credentials", () => {
+  const output = sanitizeLogMessage(
+    "PGPASSWORD=pg-secret MYSQL_PWD=mysql-secret REDIS_PASSWORD=redis-secret DATABASE_URL=postgres://user:pass@example.test/db",
+  );
+
+  assert.equal(
+    output.includes("pg-secret"),
+    false,
+  );
+
+  assert.equal(
+    output.includes("mysql-secret"),
+    false,
+  );
+
+  assert.equal(
+    output.includes("redis-secret"),
+    false,
+  );
+
+  assert.equal(
+    output.includes("user:pass@example.test"),
+    false,
+  );
+
+  assert.match(
+    output,
+    /PGPASSWORD=\[REDACTED\]/,
+  );
+
+  assert.match(
+    output,
+    /MYSQL_PWD=\[REDACTED\]/,
+  );
+
+  assert.match(
+    output,
+    /DATABASE_URL=\[REDACTED\]/,
+  );
+});
+
 test("sanitizeLogMessage redacts JSON-like secrets", () => {
   const output = sanitizeLogMessage(
     '{"password":"very-secret","token":"abcdefgh12345678"}',
