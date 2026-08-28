@@ -3128,10 +3128,10 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
 </span>
 <span>{relativeTime(backup.createdAt)}</span>
 {canOperate ? (
-  <span className="backup-actions">
+  <span className="backup-actions-cell">
     {backup.status === "Completed" && (
       <button
-        className="restore-btn"
+        className="backup-action-btn restore-btn"
         onClick={() => void restoreBackup(backup)}
       >
         <RotateCcw size={15} />
@@ -3141,9 +3141,10 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
 
     {backup.status !== "Running" && (
       <button
-        className="restore-btn"
+        className="backup-action-btn backup-delete-btn"
         onClick={() => void deleteBackup(backup)}
       >
+        <X size={15} />
         Hapus
       </button>
     )}
