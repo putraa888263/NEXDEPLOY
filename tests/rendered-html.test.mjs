@@ -52,7 +52,12 @@ test("server-renders the NEXDEPLOY shell", async () => {
 
   assert.match(
     html,
-    /Menyiapkan NEXDEPLOY\.\.\./,
+    /Menyiapkan workspace/,
+  );
+
+  assert.match(
+    html,
+    /role=["']status["'][^>]*aria-live=["']polite["']/,
   );
 
   assert.doesNotMatch(

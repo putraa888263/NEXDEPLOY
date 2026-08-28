@@ -114,6 +114,41 @@ function relativeTime(value: string) {
   return `${Math.floor(hours / 24)} hari lalu`;
 }
 
+function LoadingScreen() {
+  return (
+    <main className="loading-screen" role="status" aria-live="polite" aria-label="Menyiapkan NEXDEPLOY">
+      <div className="loading-grid" aria-hidden="true" />
+      <div className="loading-stage">
+        <div className="loading-brand"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div>
+        <div className="loading-core" aria-hidden="true">
+          <span className="loading-orbit orbit-one"><i /></span>
+          <span className="loading-orbit orbit-two"><i /></span>
+          <Server size={29} />
+        </div>
+        <div className="loading-copy">
+          <span className="login-kicker">CONTROL PLANE</span>
+          <h1>Menyiapkan workspace</h1>
+          <p>Menyambungkan panel, executor, dan layanan runtime.</p>
+        </div>
+        <div className="loading-progress" aria-hidden="true"><span /></div>
+        <div className="loading-steps" aria-hidden="true">
+          <span><i />Panel</span><span><i />Executor</span><span><i />Runtime</span>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function LoginSystemMap() {
+  return (
+    <div className="login-system-map" aria-hidden="true">
+      <span><i className="system-node active"><LayoutDashboard size={14} /></i><b>Panel</b><small>Siap</small></span>
+      <span><i className="system-node"><TerminalSquare size={14} /></i><b>Executor</b><small>Terhubung</small></span>
+      <span><i className="system-node"><Box size={14} /></i><b>Runtime</b><small>Dipantau</small></span>
+    </div>
+  );
+}
+
 export default function Home() {
   const [view, setView] = useState<View>("dashboard");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -139,6 +174,10 @@ export default function Home() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+    let readyTimer: number | undefined;
+    const startedAt = performance.now();
+
     Promise.all([fetch("/api/setup").then((response) => response.json()), fetch("/api/auth/session")]).then(async ([setup, response]) => {
       setNeedsSetup(Boolean(setup.needsSetup));
       if (!response.ok) return;
@@ -146,7 +185,17 @@ export default function Home() {
       setRole(user.role as Role);
       setSignedInUser(user as SignedInUser);
       await loadPanel();
-    }).catch(() => undefined).finally(() => setReady(true));
+    }).catch(() => undefined).finally(() => {
+      const remaining = Math.max(0, 850 - (performance.now() - startedAt));
+      readyTimer = window.setTimeout(() => {
+        if (!cancelled) setReady(true);
+      }, remaining);
+    });
+
+    return () => {
+      cancelled = true;
+      if (readyTimer !== undefined) window.clearTimeout(readyTimer);
+    };
   }, []);
 
   const filtered = useMemo(() => projects.filter((project) => {
@@ -540,7 +589,7 @@ export default function Home() {
   }
   async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setRole(null); setSignedInUser(null); setProjects([]); setSelected(null); setView("dashboard"); }
 
-  if (!ready) return <div className="auth-loading">Menyiapkan NEXDEPLOY...</div>;
+  if (!ready) return <LoadingScreen />;
   if (!role) return needsSetup ? <InitialSetup onComplete={() => setNeedsSetup(false)} /> : <LoginScreen onLogin={login} />;
 
   const canOperate = role !== "Viewer";
@@ -3219,7 +3268,7 @@ function InitialSetup({ onComplete }: { onComplete: () => void }) {
 
     onComplete();
   };
-  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">INSTALASI AWAL</span><h1>Siapkan akses panel pertama.</h1><p>Buat akun Administrator untuk mengamankan workspace deployment Anda.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Pendaftaran sekali saja</strong><small>Setelah selesai, pengguna baru dikelola dari panel</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">ADMINISTRATOR</span><h2>Buat akun utama</h2><p>Gunakan email aktif dan password kuat untuk akses pertama.</p></div><label><span>Nama</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Password</span><input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password</span><input required type="password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={saving}>{<ShieldCheck size={18} />}{saving ? "Menyiapkan akun..." : "Selesaikan instalasi"}</button></form></section></main>;
+  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div className="login-intro"><span className="login-kicker">INSTALASI AWAL</span><h1>Siapkan akses panel pertama.</h1><p>Buat akun Administrator untuk mengamankan workspace deployment Anda.</p><LoginSystemMap /></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Pendaftaran sekali saja</strong><small>Setelah selesai, pengguna baru dikelola dari panel</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">ADMINISTRATOR</span><h2>Buat akun utama</h2><p>Gunakan email aktif dan password kuat untuk akses pertama.</p></div><label><span>Nama</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Email</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Password</span><input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label><span>Konfirmasi password</span><input required type="password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={saving}>{<ShieldCheck size={18} />}{saving ? "Menyiapkan akun..." : "Selesaikan instalasi"}</button></form></section></main>;
 }
 
 function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<string | null> }) {
@@ -3228,5 +3277,5 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
   const [error, setError] = useState("");
 const [submitting, setSubmitting] = useState(false);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 6) { setError("Masukkan email dan password minimal 6 karakter."); return; } setSubmitting(true); setError(""); const message = await onLogin(email, password); if (message) setError(message); setSubmitting(false); };
-  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Gunakan akun panel untuk mengakses fitur sesuai peran yang sudah ditetapkan.</p></div><label><span>Email</span><input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label><label><span>Password</span><input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={submitting}>{<LogIn size={18} />}{submitting ? "Memeriksa akun..." : "Masuk ke panel"}</button></form></section></main>;
+  return <main className="login-page"><section className="login-brand"><div className="brand login-logo"><span className="brand-mark"><Zap size={18} fill="currentColor" /></span><span>NEXDEPLOY</span></div><div className="login-intro"><span className="login-kicker">CONTROL PANEL</span><h1>Deployment VPS yang terasa sederhana.</h1><p>Kelola aplikasi, database, domain, log, dan backup dari satu workspace yang tertata.</p><LoginSystemMap /></div><div className="login-health"><ShieldCheck size={19} /><span><strong>Panel terlindungi</strong><small>Akses disesuaikan dengan peran pengguna</small></span></div></section><section className="login-form-wrap"><form className="login-form" onSubmit={submit}><div><span className="login-kicker">SELAMAT DATANG</span><h2>Masuk ke NEXDEPLOY</h2><p>Gunakan akun panel untuk mengakses fitur sesuai peran yang sudah ditetapkan.</p></div><label><span>Email</span><input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label><label><span>Password</span><input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>{error && <p className="login-error">{error}</p>}<button className="primary-btn login-submit" disabled={submitting}>{<LogIn size={18} />}{submitting ? "Memeriksa akun..." : "Masuk ke panel"}</button></form></section></main>;
 }
