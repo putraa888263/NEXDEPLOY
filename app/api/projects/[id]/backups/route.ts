@@ -300,6 +300,9 @@ export async function POST(
           )
         : [];
 
+    const prunedBackupIds =
+      new Set<string>();
+
     for (const prunedFile of prunedFiles) {
       const prunedBackups =
         await getD1()
@@ -320,6 +323,10 @@ export async function POST(
           .all<{ id: string }>();
 
       for (const prunedBackup of prunedBackups.results ?? []) {
+        prunedBackupIds.add(
+          prunedBackup.id,
+        );
+
         await getD1()
           .prepare(
             `
@@ -469,6 +476,8 @@ export async function POST(
           databaseType:
             project.database,
         },
+        prunedBackupIds:
+          [...prunedBackupIds],
       },
       {
         status: 201,

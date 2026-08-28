@@ -2918,9 +2918,26 @@ function BackupsView({ compact = false, project, notify, canOperate = false }: {
     }
 
     if (result.backup) {
+      const prunedBackupIds =
+        new Set<string>(
+          Array.isArray(
+            result.prunedBackupIds,
+          )
+            ? result.prunedBackupIds.filter(
+                (backupId: unknown): backupId is string =>
+                  typeof backupId === "string",
+              )
+            : [],
+        );
+
       setBackups((items) => [
         result.backup,
-        ...items,
+        ...items.filter(
+          (item) =>
+            !prunedBackupIds.has(
+              item.id,
+            ),
+        ),
       ]);
     }
 
