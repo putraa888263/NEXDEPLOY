@@ -597,6 +597,8 @@ export default function Home() {
 
   const pageTitle = view === "dashboard" ? `Selamat siang, ${signedInUser?.name ?? "Pengguna"}` : view === "projects" ? "Semua project" : view === "activity" ? "Aktivitas deployment" : view === "backups" ? "Backup & pemulihan" : "Pengaturan";
   const avatarInitials = signedInUser?.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() ?? "US";
+  const activeProjects = projects.filter((project) => project.status === "Healthy").length;
+  const deployingProjects = projects.filter((project) => project.status === "Deploying").length;
 
   return (
     <div className="app-shell">
@@ -649,16 +651,57 @@ export default function Home() {
             />
           ) : (
             <>
-              <div className="page-heading">
-                <div><p className="eyebrow">NEXDEPLOY / {view === "dashboard" ? "Ringkasan" : pageTitle}</p><h1>{pageTitle}</h1><p>{view === "dashboard" ? "Semua layanan berjalan dengan baik. Berikut kondisi VPS kamu hari ini." : descriptions[view]}</p></div>
-                {view === "dashboard" && <div className="system-ok"><ShieldCheck size={18} /><span><strong>Sistem sehat</strong><small>Diperiksa 1 menit lalu</small></span></div>}
+              <div className="page-heading page-command">
+                <div className="page-copy">
+                  <p className="eyebrow">NEXDEPLOY / {view === "dashboard" ? "Ringkasan" : pageTitle}</p>
+                  <h1>{pageTitle}</h1>
+                  <p>{view === "dashboard" ? "Pantau server, deployment, backup, dan project aktif dari satu panel kontrol." : descriptions[view]}</p>
+                </div>
+
+                <div className="command-dock" aria-label="Ringkasan workspace">
+                  <span>
+                    <ShieldCheck size={17} />
+                    <strong>{activeProjects}</strong>
+                    <small>Healthy</small>
+                  </span>
+                  <span>
+                    <CloudUpload size={17} />
+                    <strong>{deployingProjects}</strong>
+                    <small>Deploying</small>
+                  </span>
+                  <span>
+                    <Box size={17} />
+                    <strong>{projects.length}</strong>
+                    <small>Project</small>
+                  </span>
+                </div>
               </div>
 
-              {view === "dashboard" && <Dashboard projects={projects} openProject={setSelected} goProjects={() => setView("projects")} />}
-              {view === "projects" && <ProjectsView projects={filtered} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} openProject={setSelected} openModal={() => setModalOpen(true)} canOperate={canOperate} />}
-              {view === "activity" && <ActivityView />}
-              {view === "backups" && <BackupsView notify={notify} />}
-              {view === "settings" && <><SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} isAdmin={isAdmin} />{isAdmin && <ExecutorSettings notify={notify} />}</>}
+              <section className="workspace-pulse" aria-label="Status sistem">
+                <div>
+                  <span className="pulse-dot" />
+                  <strong>Panel online</strong>
+                  <small>Executor dan metrics dipantau otomatis</small>
+                </div>
+                <div>
+                  <Database size={16} />
+                  <strong>Backup retention aktif</strong>
+                  <small>Metadata ikut disinkronkan</small>
+                </div>
+                <div>
+                  <TerminalSquare size={16} />
+                  <strong>Log container siap</strong>
+                  <small>Auto-refresh tersedia</small>
+                </div>
+              </section>
+
+              <div className="view-stage" key={view}>
+                {view === "dashboard" && <Dashboard projects={projects} openProject={setSelected} goProjects={() => setView("projects")} />}
+                {view === "projects" && <ProjectsView projects={filtered} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} openProject={setSelected} openModal={() => setModalOpen(true)} canOperate={canOperate} />}
+                {view === "activity" && <ActivityView />}
+                {view === "backups" && <BackupsView notify={notify} />}
+                {view === "settings" && <><SettingsView notify={notify} settings={settings} onSave={saveSettings} onChangePassword={changePassword} isAdmin={isAdmin} />{isAdmin && <ExecutorSettings notify={notify} />}</>}
+              </div>
             </>
           )}
         </div>
