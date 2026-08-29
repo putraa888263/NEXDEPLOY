@@ -85,8 +85,31 @@ type ProjectResources = { phpVersion: string; cpuLimit: number; memoryLimit: num
 type Backup = { id: string; name: string; type: string; status: string; size: number | null; fileName?: string | null; databaseType?: string | null; retentionDays: number; createdAt: string; completedAt: string | null };
 type ActivityRecord = { id: string; type: "deployment" | "system" | "backup" | "account" | "environment" | "resource"; title: string; detail: string; createdAt: string; projectName: string | null };
 type ArchiveValidation = { detectedFramework: string; files: number; readiness: "Ready" | "Warning"; warnings: string[]; requirements: { composer: boolean; phpVersion: string | null; laravelVersion: string | null; envExample: boolean; migrations: boolean; packageJson: boolean; buildScript: boolean } };
+type SystemMetrics = {
+  timestamp: string;
+  cpu: { usage: number; cores: number };
+  memory: { total: number; used: number; available: number; usage: number };
+  disk: { total: number; used: number; available: number; usage: number };
+  load: { one: number; five: number; fifteen: number };
+  uptime: number;
+  docker: { status: string; total: number; running: number; stopped: number };
+};
 
 const defaultSettings: AppSettings = { serverName: "VPS Utama", serverIp: "103.127.96.42", location: "Jakarta", projectDirectory: "/opt/nexdeploy/projects", baseDomain: "apps.adecloud.id", npmUrl: "http://103.127.96.42:81", sslEmail: "admin@adecloud.id", defaultDatabase: "MariaDB", databaseVersion: "11.4", backupRetention: 7 };
+
+const formatBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 GB";
+  }
+
+  const gb = bytes / 1024 / 1024 / 1024;
+
+  if (gb >= 100) {
+    return `${gb.toFixed(0)} GB`;
+  }
+
+  return `${gb.toFixed(1)} GB`;
+};
 
 
 const navItems = [
@@ -163,6 +186,10 @@ export default function Home() {
   const [filter, setFilter] = useState("Semua");
   const [modalOpen, setModalOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [recentActivity, setRecentActivity] = useState<ActivityRecord[]>([]);
+  const [sidebarMetrics, setSidebarMetrics] = useState<SystemMetrics | null>(null);
+  const [sidebarMetricsError, setSidebarMetricsError] = useState("");
   const [toast, setToast] = useState("");
 
   async function loadPanel() {
@@ -208,6 +235,55 @@ export default function Home() {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
   }
+
+  const loadSidebarMetrics = useCallback(async () => {
+    try {
+      const response = await fetch("/api/system/metrics", { cache: "no-store" });
+      const result = await response.json().catch(() => ({})) as { metrics?: SystemMetrics; error?: string };
+
+      if (!response.ok || !result.metrics) {
+        throw new Error(result.error || "Metrics VPS tidak tersedia.");
+      }
+
+      setSidebarMetrics(result.metrics);
+      setSidebarMetricsError("");
+    } catch (error) {
+      setSidebarMetricsError(error instanceof Error ? error.message : "Metrics VPS tidak tersedia.");
+    }
+  }, []);
+
+  const loadRecentActivity = useCallback(async () => {
+    try {
+      const response = await fetch("/api/activity?type=all", { cache: "no-store" });
+      const result = await response.json().catch(() => ({})) as { activity?: ActivityRecord[] };
+
+      if (response.ok) {
+        setRecentActivity((result.activity ?? []).slice(0, 5));
+      }
+    } catch {
+      setRecentActivity([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!role) {
+      return;
+    }
+
+    const initialLoad = window.setTimeout(() => {
+      void loadSidebarMetrics();
+      void loadRecentActivity();
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      void loadSidebarMetrics();
+    }, 10000);
+
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, [loadRecentActivity, loadSidebarMetrics, role]);
 
   function goTo(next: View) {
     setView(next);
@@ -599,6 +675,14 @@ export default function Home() {
   const avatarInitials = signedInUser?.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() ?? "US";
   const activeProjects = projects.filter((project) => project.status === "Healthy").length;
   const deployingProjects = projects.filter((project) => project.status === "Deploying").length;
+  const serverUsage = sidebarMetrics?.memory.usage ?? sidebarMetrics?.disk.usage ?? 0;
+  const serverUsageLabel = sidebarMetrics
+    ? `${Math.round(serverUsage)}% terpakai`
+    : sidebarMetricsError
+      ? "Metrics tidak tersedia"
+      : "Memuat metrics";
+  const serverCapacityLabel = sidebarMetrics ? formatBytes(sidebarMetrics.memory.total) : settings.serverIp;
+  const unreadActivityCount = recentActivity.length;
 
   return (
     <div className="app-shell">
@@ -612,13 +696,24 @@ export default function Home() {
           <p className="nav-label secondary">Sistem</p>
           <button className={view === "settings" ? "active" : ""} onClick={() => goTo("settings")}><Settings size={19} /><span>Pengaturan</span></button>
         </nav>
-        <div className="server-brief">
-          <div className="server-heading"><span><i />VPS Utama</span><MoreHorizontal size={18} /></div>
-          <p>Online · Jakarta</p>
-          <div className="mini-meter"><span style={{ width: "42%" }} /></div>
-          <div className="server-meta"><span>42% terpakai</span><span>64 GB</span></div>
+        <div className="sidebar-bottom">
+        <button
+          type="button"
+          className="server-brief"
+          onClick={() => goTo("dashboard")}
+          title="Buka ringkasan VPS"
+        >
+          <div className="server-heading"><span><i />{settings.serverName || "VPS Utama"}</span><MoreHorizontal size={18} /></div>
+          <p>{sidebarMetricsError ? "Perlu dicek" : "Online"} · {settings.location || settings.serverIp}</p>
+          <div className="mini-meter"><span style={{ width: `${Math.min(100, Math.max(0, serverUsage))}%` }} /></div>
+          <div className="server-meta"><span>{serverUsageLabel}</span><span>{serverCapacityLabel}</span></div>
+        </button>
+        <button className="profile profile-button" onClick={logout} title="Keluar">
+          <span className="avatar">{avatarInitials}</span>
+          <div><strong>{signedInUser?.name}</strong><small>{role}</small></div>
+          <LogOut size={16} />
+        </button>
         </div>
-        <button className="profile profile-button" onClick={logout} title="Keluar"><span className="avatar">{avatarInitials}</span><div><strong>{signedInUser?.name}</strong><small>{role}</small></div><LogOut size={16} /></button>
       </aside>
 
       {menuOpen && <button className="scrim" aria-label="Tutup menu" onClick={() => setMenuOpen(false)} />}
@@ -628,7 +723,42 @@ export default function Home() {
           <button className="icon-btn mobile-menu" aria-label="Buka menu" onClick={() => setMenuOpen(true)}><Menu size={21} /></button>
           <div className="mobile-brand">NEXDEPLOY</div>
           <div className="topbar-actions">
-            <button className="icon-btn" aria-label="Notifikasi" title="Notifikasi"><Bell size={19} /><span className="notification-dot" /></button>
+            <div className="notification-wrap">
+              <button
+                className={`icon-btn ${notificationOpen ? "active" : ""}`}
+                aria-label="Notifikasi"
+                aria-expanded={notificationOpen}
+                title="Notifikasi"
+                onClick={() => {
+                  setNotificationOpen((open) => !open);
+                  void loadRecentActivity();
+                }}
+              >
+                <Bell size={19} />
+                {unreadActivityCount > 0 && <span className="notification-dot" />}
+              </button>
+              {notificationOpen && (
+                <div className="notification-panel">
+                  <div className="notification-head">
+                    <strong>Notifikasi</strong>
+                    <button className="text-btn" onClick={() => goTo("activity")}>Lihat aktivitas</button>
+                  </div>
+                  <div className="notification-list">
+                    {recentActivity.length ? recentActivity.map((item) => (
+                      <button key={item.id} type="button" onClick={() => goTo("activity")}>
+                        <span className={`notification-type ${item.type}`} />
+                        <span>
+                          <strong>{item.title}</strong>
+                          <small>{item.projectName ? `${item.projectName} · ` : ""}{relativeTime(item.createdAt)}</small>
+                        </span>
+                      </button>
+                    )) : (
+                      <p>Belum ada aktivitas baru.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             {canOperate && <button className="primary-btn" onClick={() => setModalOpen(true)}><Plus size={18} /><span>Project baru</span></button>}
           </div>
         </header>
