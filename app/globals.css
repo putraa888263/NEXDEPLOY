@@ -2210,6 +2210,8 @@ html {
 
 .app-shell {
   min-height: 100vh;
+  /* Keep the fixed sidebar attached to the viewport. */
+  animation: none;
 }
 
 .sidebar {
@@ -2222,6 +2224,7 @@ html {
 .main-content {
   min-height: 100vh;
   margin-left: 256px;
+  animation: shell-lift .62s var(--ease-out) both;
 }
 
 @media (max-width: 1100px) and (min-width: 861px) {
