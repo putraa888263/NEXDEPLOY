@@ -265,11 +265,6 @@ export default function Home() {
     }
   }, []);
 
-  const refreshVpsSummary = async () => {
-    await loadSidebarMetrics();
-    notify("Metrics VPS diperbarui.");
-  };
-
   useEffect(() => {
     if (!role) {
       return;
@@ -702,17 +697,13 @@ export default function Home() {
           <button className={view === "settings" ? "active" : ""} onClick={() => goTo("settings")}><Settings size={19} /><span>Pengaturan</span></button>
         </nav>
         <div className="sidebar-bottom">
-        <button
-          type="button"
-          className="server-brief"
-          onClick={() => void refreshVpsSummary()}
-          title="Refresh metrics VPS"
-        >
-          <div className="server-heading"><span><i />{settings.serverName || "VPS Utama"}</span><RefreshCw size={16} /></div>
-          <p>{sidebarMetricsError ? "Perlu dicek" : "Online"} · {settings.location || settings.serverIp}</p>
+        <div className="server-brief" aria-live="polite">
+          <div className="server-heading"><span><i />{settings.serverName || "VPS Utama"}</span><small>Live</small></div>
+          <p>{sidebarMetricsError ? "Metrics perlu dicek" : "Panel online"} · {settings.location || settings.serverIp}</p>
           <div className="mini-meter"><span style={{ width: `${Math.min(100, Math.max(0, serverUsage))}%` }} /></div>
           <div className="server-meta"><span>{serverUsageLabel}</span><span>{serverCapacityLabel}</span></div>
-        </button>
+          <small className="server-live-note">Executor dan metrics dipantau otomatis</small>
+        </div>
         <button className="profile profile-button" onClick={logout} title="Keluar">
           <span className="avatar">{avatarInitials}</span>
           <div><strong>{signedInUser?.name}</strong><small>{role}</small></div>

@@ -2016,7 +2016,7 @@ html {
   margin: 0;
   border: 0;
   color: inherit;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
   transition: border-color .2s var(--ease-out), background .2s var(--ease-out), box-shadow .2s var(--ease-out), transform .2s var(--ease-spring);
 }
@@ -2028,15 +2028,29 @@ html {
 }
 
 .sidebar .server-brief:active {
-  transform: translateY(0) scale(.99);
+  transform: none;
 }
 
-.sidebar .server-heading svg {
-  transition: transform .28s var(--ease-spring);
+.server-heading small {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(104,213,162,.22);
+  border-radius: 999px;
+  background: rgba(104,213,162,.1);
+  color: #7ee0ac;
+  font-size: 9px;
+  font-weight: 780;
+  text-transform: uppercase;
 }
 
-.sidebar .server-brief:hover .server-heading svg {
-  transform: rotate(40deg);
+.server-live-note {
+  display: block;
+  margin-top: 8px;
+  color: #7f8a9a;
+  font-size: 9px;
+  line-height: 1.35;
 }
 
 .sidebar .profile-button {
