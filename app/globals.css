@@ -2216,10 +2216,13 @@ html {
 
 .sidebar {
   position: sticky;
-  top: 0;
+  top: 88px;
   inset: auto;
   grid-column: 1;
   grid-row: 1;
+  align-self: start;
+  height: calc(100dvh - 88px);
+  max-height: calc(100dvh - 88px);
 }
 
 .main-content {
@@ -2241,6 +2244,8 @@ html {
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
+    height: 100dvh;
+    max-height: none;
   }
 
   .main-content {
