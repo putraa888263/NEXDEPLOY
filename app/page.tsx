@@ -265,6 +265,11 @@ export default function Home() {
     }
   }, []);
 
+  const refreshVpsSummary = async () => {
+    await loadSidebarMetrics();
+    notify("Metrics VPS diperbarui.");
+  };
+
   useEffect(() => {
     if (!role) {
       return;
@@ -700,10 +705,10 @@ export default function Home() {
         <button
           type="button"
           className="server-brief"
-          onClick={() => goTo("dashboard")}
-          title="Buka ringkasan VPS"
+          onClick={() => void refreshVpsSummary()}
+          title="Refresh metrics VPS"
         >
-          <div className="server-heading"><span><i />{settings.serverName || "VPS Utama"}</span><MoreHorizontal size={18} /></div>
+          <div className="server-heading"><span><i />{settings.serverName || "VPS Utama"}</span><RefreshCw size={16} /></div>
           <p>{sidebarMetricsError ? "Perlu dicek" : "Online"} · {settings.location || settings.serverIp}</p>
           <div className="mini-meter"><span style={{ width: `${Math.min(100, Math.max(0, serverUsage))}%` }} /></div>
           <div className="server-meta"><span>{serverUsageLabel}</span><span>{serverCapacityLabel}</span></div>

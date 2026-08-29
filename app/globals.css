@@ -1988,27 +1988,33 @@ html {
 
 .sidebar {
   min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr) auto;
+  overflow: hidden;
 }
 
 .main-nav {
-  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(148,163,184,.32) transparent;
 }
 
 .sidebar-bottom {
   display: grid;
-  flex: 0 0 auto;
   gap: 8px;
   margin-top: auto;
   padding: 0 12px 12px;
+  min-height: 0;
 }
 
 .sidebar .server-brief {
   width: 100%;
   margin: 0;
+  border: 0;
   color: inherit;
   cursor: pointer;
   text-align: left;
@@ -2019,6 +2025,18 @@ html {
   border-color: rgba(129,166,231,.34);
   box-shadow: 0 16px 34px rgba(0,0,0,.18);
   transform: translateY(-2px);
+}
+
+.sidebar .server-brief:active {
+  transform: translateY(0) scale(.99);
+}
+
+.sidebar .server-heading svg {
+  transition: transform .28s var(--ease-spring);
+}
+
+.sidebar .server-brief:hover .server-heading svg {
+  transform: rotate(40deg);
 }
 
 .sidebar .profile-button {
