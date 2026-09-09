@@ -216,6 +216,9 @@ const stateDir =
 const jobs =
   new Map();
 
+const terminalCommands =
+  new Map();
+
 if (!token) {
   throw new Error(
     "EXECUTOR_TOKEN wajib diisi di executor/.env sebelum executor dijalankan.",
@@ -275,6 +278,13 @@ function jobFile(id) {
   );
 }
 
+function terminalCommandFile(id) {
+  return join(
+    stateDir,
+    `terminal-${id}.json`,
+  );
+}
+
 async function save(job) {
   await mkdir(
     stateDir,
@@ -295,6 +305,38 @@ async function save(job) {
   );
 }
 
+
+async function saveTerminalCommand(commandState) {
+await mkdir(
+stateDir,
+{
+recursive: true,
+},
+);
+await writeFile(
+terminalCommandFile(
+commandState.id,
+),
+JSON.stringify(
+commandState,
+null,
+2,
+),
+);
+}
+
+async function loadTerminalCommand(id) {
+try {
+const raw =
+await readFile(
+terminalCommandFile(id),
+"utf8",
+);
+return JSON.parse(raw);
+} catch {
+return null;
+}
+}
 
 async function load(id) {
   if (
@@ -323,6 +365,257 @@ async function load(id) {
   } catch {
     return null;
   }
+}
+
+const TERMINAL_MAX_OUTPUT_BYTES =
+256 * 1024;
+
+const TERMINAL_TIMEOUT_MS =
+5 * 60 * 1000;
+
+function appendTerminalOutput(
+commandState,
+chunk,
+) {
+const text =
+chunk.toString();
+
+const remaining =
+TERMINAL_MAX_OUTPUT_BYTES -
+Buffer.byteLength(
+commandState.output,
+"utf8",
+);
+
+if (remaining <= 0) {
+commandState.outputTruncated =
+true;
+return;
+}
+
+const buffer =
+Buffer.from(
+text,
+"utf8",
+);
+
+if (
+buffer.byteLength <=
+remaining
+) {
+commandState.output +=
+text;
+return;
+}
+
+commandState.output +=
+buffer
+.subarray(
+0,
+remaining,
+)
+.toString(
+"utf8",
+);
+
+commandState.outputTruncated =
+true;
+}
+
+async function startTerminalCommand({
+projectSlug,
+command: terminalCommand,
+}) {
+const runtime =
+await getProjectRuntimeContainers(
+projectSlug,
+);
+
+const id =
+randomUUID();
+
+const commandState = {
+id,
+projectSlug,
+command:
+terminalCommand,
+status:
+"running",
+output:
+"",
+outputTruncated:
+false,
+startedAt:
+new Date().toISOString(),
+finishedAt:
+null,
+exitCode:
+null,
+};
+
+terminalCommands.set(
+id,
+commandState,
+);
+
+await saveTerminalCommand(
+commandState,
+);
+
+const child =
+spawn(
+"docker",
+[
+"exec",
+"--user",
+"nexdeploy",
+"--workdir",
+"/var/www/html",
+runtime.app,
+"sh",
+"-lc",
+terminalCommand,
+],
+{
+windowsHide:
+true,
+},
+);
+
+commandState.child = child;
+
+terminalCommands.set(
+id,
+commandState,
+);
+
+const persist =
+async () => {
+await saveTerminalCommand(
+commandState,
+);
+};
+
+child.stdout.on(
+"data",
+async (chunk) => {
+appendTerminalOutput(
+commandState,
+chunk,
+);
+await persist();
+},
+);
+
+child.stderr.on(
+"data",
+async (chunk) => {
+appendTerminalOutput(
+commandState,
+chunk,
+);
+await persist();
+},
+);
+
+const timeout =
+setTimeout(
+async () => {
+if (
+commandState.status !==
+"running"
+) {
+return;
+}
+
+commandState.status =
+"timeout";
+
+commandState.finishedAt =
+new Date().toISOString();
+
+await persist();
+
+child.kill(
+"SIGTERM",
+);
+},
+TERMINAL_TIMEOUT_MS,
+);
+
+child.on(
+"error",
+async (error) => {
+clearTimeout(
+timeout,
+);
+
+if (
+commandState.status !==
+"running"
+) {
+return;
+}
+
+appendTerminalOutput(
+commandState,
+`\n${error.message}\n`,
+);
+
+commandState.status =
+"failed";
+
+commandState.finishedAt =
+new Date().toISOString();
+
+await persist();
+
+terminalCommands.delete(
+id,
+);
+},
+);
+
+child.on(
+"close",
+async (code) => {
+clearTimeout(
+timeout,
+);
+
+if (
+commandState.status ===
+"running"
+) {
+commandState.status =
+code === 0
+? "completed"
+: "failed";
+
+commandState.exitCode =
+code;
+
+commandState.finishedAt =
+new Date().toISOString();
+
+await persist();
+} else {
+commandState.exitCode =
+code;
+
+await persist();
+}
+
+terminalCommands.delete(
+id,
+);
+});
+
+return {
+id,
+status:
+"running",
+};
 }
 
 async function log(
@@ -3343,6 +3636,255 @@ const server =
               },
             );
           }
+        }
+
+        const projectTerminalRunMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/terminal\/run$/,
+          );
+
+        if (
+          request.method ===
+            "POST" &&
+          projectTerminalRunMatch
+        ) {
+          const projectId =
+            projectTerminalRunMatch[1];
+
+          let payload;
+
+          try {
+            payload =
+              await body(request);
+          } catch {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "Body request tidak valid.",
+              },
+            );
+          }
+
+          const projectSlug =
+            typeof payload?.projectSlug ===
+              "string"
+              ? payload.projectSlug.trim()
+              : "";
+
+          const terminalCommand =
+            typeof payload?.command ===
+              "string"
+              ? payload.command.trim()
+              : "";
+
+          if (!projectSlug) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "projectSlug wajib diisi.",
+              },
+            );
+          }
+
+          if (!terminalCommand) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "command wajib diisi.",
+              },
+            );
+          }
+
+          if (
+            terminalCommand.length >
+            4000
+          ) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  "Command terlalu panjang. Maksimal 4000 karakter.",
+              },
+            );
+          }
+
+          try {
+            const result =
+              await startTerminalCommand({
+                projectSlug,
+                command:
+                  terminalCommand,
+              });
+
+            return json(
+              response,
+              202,
+              {
+                ok: true,
+                projectId,
+                projectSlug,
+                ...result,
+              },
+            );
+          } catch (error) {
+            return json(
+              response,
+              400,
+              {
+                error:
+                  sanitizeLogMessage(
+                    error?.message ||
+                      "Gagal menjalankan command.",
+                  ),
+              },
+            );
+          }
+        }
+
+        const projectTerminalStopMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/terminal\/([^/]+)\/stop$/,
+          );
+
+        if (
+          request.method ===
+            "POST" &&
+          projectTerminalStopMatch
+        ) {
+          const projectId =
+            projectTerminalStopMatch[1];
+
+          const commandId =
+            projectTerminalStopMatch[2];
+
+          const commandState =
+            terminalCommands.get(
+              commandId,
+            );
+
+          if (!commandState) {
+            return json(
+              response,
+              404,
+              {
+                error:
+                  "Terminal command tidak sedang berjalan.",
+              },
+            );
+          }
+
+          if (
+            commandState.status !==
+            "running"
+          ) {
+            return json(
+              response,
+              409,
+              {
+                error:
+                  "Terminal command sudah selesai.",
+                status:
+                  commandState.status,
+              },
+            );
+          }
+
+          commandState.status =
+            "stopped";
+
+          commandState.finishedAt =
+            new Date().toISOString();
+
+          await saveTerminalCommand(
+            commandState,
+          );
+
+          commandState.child.kill(
+            "SIGTERM",
+          );
+
+          return json(
+            response,
+            200,
+            {
+              ok: true,
+              projectId,
+              id:
+                commandState.id,
+              status:
+                commandState.status,
+            },
+          );
+        }
+
+        const projectTerminalStatusMatch =
+          url.pathname.match(
+            /^\/projects\/([^/]+)\/terminal\/([^/]+)$/,
+          );
+
+        if (
+          request.method ===
+            "GET" &&
+          projectTerminalStatusMatch
+        ) {
+          const projectId =
+            projectTerminalStatusMatch[1];
+
+          const commandId =
+            projectTerminalStatusMatch[2];
+
+          const commandState =
+            terminalCommands.get(
+              commandId,
+            ) ||
+            await loadTerminalCommand(
+              commandId,
+            );
+
+          if (!commandState) {
+            return json(
+              response,
+              404,
+              {
+                error:
+                  "Terminal command tidak ditemukan.",
+              },
+            );
+          }
+
+          return json(
+            response,
+            200,
+            {
+              ok: true,
+              projectId,
+              id:
+                commandState.id,
+              projectSlug:
+                commandState.projectSlug,
+              command:
+                commandState.command,
+              status:
+                commandState.status,
+              output:
+                commandState.output,
+              outputTruncated:
+                commandState.outputTruncated,
+              startedAt:
+                commandState.startedAt,
+              finishedAt:
+                commandState.finishedAt,
+              exitCode:
+                commandState.exitCode,
+            },
+          );
         }
 
         const projectLogsMatch =

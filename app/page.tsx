@@ -1271,6 +1271,7 @@ function ProjectDetail({
     ["database", "Database"],
     ["backups", "Backup"],
     ["logs", "Log"],
+    ["terminal", "Terminal"],
   ];
 
   const [deleteOpen, setDeleteOpen] =
@@ -1523,7 +1524,15 @@ function ProjectDetail({
         />
       )}
 
-      {deleteOpen && (
+      {tab === "terminal" && (
+      <TerminalTab
+        project={project}
+        notify={notify}
+        canOperate={canOperate}
+      />
+    )}
+
+    {deleteOpen && (
         <div
           className="permanent-delete-backdrop"
           role="presentation"
@@ -1720,6 +1729,219 @@ function deploymentHasFinalLog(
   return false;
 }
 
+
+function TerminalTab({
+  project,
+  notify,
+  canOperate,
+}: {
+  project: Project;
+  notify: (message: string) => void;
+  canOperate: boolean;
+}) {
+  const [command, setCommand] = useState("");
+  const [commandId, setCommandId] = useState<string | null>(null);
+  const [output, setOutput] = useState("");
+  const [status, setStatus] = useState<
+    "idle" | "running" | "completed" | "failed" | "stopped" | "timeout"
+  >("idle");
+
+  async function runCommand() {
+    const value = command.trim();
+    if (!value || !canOperate || status === "running") return;
+
+    setOutput("");
+    setStatus("running");
+    setCommandId(null);
+
+    try {
+      const response = await fetch(
+        `/api/projects/${project.id}/terminal/run`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+              projectSlug: project.slug,
+              command: value,
+          }),
+        },
+      );
+
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setStatus("failed");
+        notify(result.error || "Command gagal dijalankan.");
+        return;
+      }
+
+      setCommandId(result.id);
+    } catch {
+      setStatus("failed");
+      notify("Tidak dapat terhubung ke Terminal.");
+    }
+  }
+
+  useEffect(() => {
+    if (!commandId || status !== "running") return;
+
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const response = await fetch(
+          `/api/projects/${project.id}/terminal/${commandId}`,
+          {
+            cache: "no-store",
+          },
+        );
+
+        const result = await response.json().catch(() => ({}));
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setStatus("failed");
+          notify(result.error || "Status command tidak dapat diambil.");
+          return;
+        }
+
+        setOutput(result.output || "");
+        setStatus(result.status || "running");
+
+        if (result.status === "running") {
+          window.setTimeout(poll, 500);
+        }
+      } catch {
+        if (!cancelled) {
+          setStatus("failed");
+          notify("Gagal mengambil output Terminal.");
+        }
+      }
+    }
+
+    poll();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [commandId, project.id, status, notify]);
+
+  async function stopCommand() {
+    if (!commandId || status !== "running") return;
+
+    try {
+      const response = await fetch(
+        `/api/projects/${project.id}/terminal/${commandId}/stop`,
+        {
+          method: "POST",
+        },
+      );
+
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        notify(result.error || "Command gagal dihentikan.");
+        return;
+      }
+
+      setStatus("stopped");
+    } catch {
+      notify("Gagal menghentikan command.");
+    }
+  }
+
+  function clearTerminal() {
+    setOutput("");
+    setStatus("idle");
+    setCommandId(null);
+  }
+
+  const isRunning = status === "running";
+
+  return (
+    <div className="terminal-tab">
+      <section className="panel">
+        <div className="panel-head dark">
+          <div>
+            <h2>Terminal</h2>
+            <p>Jalankan command di dalam container aplikasi project.</p>
+          </div>
+          <span>
+            <i />
+            {isRunning
+              ? "Running"
+              : status === "completed"
+                ? "Selesai"
+                : status === "failed"
+                  ? "Gagal"
+                  : status === "stopped"
+                    ? "Dihentikan"
+                    : status === "timeout"
+                      ? "Timeout"
+                      : "Ready"}
+          </span>
+        </div>
+
+        <div className="terminal">
+          {output ? (
+            <pre>{output}</pre>
+          ) : (
+            <p>
+              <code>Terminal siap digunakan.</code>
+            </p>
+          )}
+        </div>
+
+        <div className="terminal-command">
+          <span>$</span>
+          <input
+            value={command}
+            onChange={(event) => setCommand(event.target.value)}
+            placeholder="Contoh: php artisan migrate"
+            disabled={!canOperate || isRunning}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                runCommand();
+              }
+            }}
+          />
+
+          {isRunning ? (
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={stopCommand}
+            >
+              Hentikan
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={!canOperate || !command.trim()}
+              onClick={runCommand}
+            >
+              <Play size={15} />
+              Jalankan
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={clearTerminal}
+          >
+            Bersihkan
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function ContainerLogPanel({
   projectId,
