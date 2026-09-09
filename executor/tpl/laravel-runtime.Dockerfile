@@ -8,6 +8,9 @@ RUN apk add --no-cache \
         oniguruma \
         libpq \
         mariadb-connector-c \
+        freetype \
+        libjpeg-turbo \
+        libpng \
     && apk add --no-cache --virtual .build-deps \
         icu-dev \
         libzip-dev \
@@ -15,6 +18,12 @@ RUN apk add --no-cache \
         postgresql-dev \
         mariadb-connector-c-dev \
         linux-headers \
+        freetype-dev \
+        libjpeg-turbo-dev \
+        libpng-dev \
+    && docker-php-ext-configure gd \
+        --with-freetype \
+        --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" \
         pdo \
         pdo_mysql \
@@ -25,6 +34,7 @@ RUN apk add --no-cache \
         zip \
         opcache \
         pcntl \
+        gd \
     && apk del .build-deps
 
 COPY --from=composer-bin \
