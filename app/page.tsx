@@ -1324,7 +1324,7 @@ function ProjectDetail({
   }
 
   return (
-    <>
+    <div className="project-page">
       <button
         className="back-btn"
         onClick={onBack}
@@ -1688,7 +1688,7 @@ function ProjectDetail({
           </section>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
